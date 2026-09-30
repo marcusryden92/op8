@@ -34,6 +34,7 @@ CHudNumericDisplay::CHudNumericDisplay(vgui::Panel *parent, const char *name) : 
 	m_bDisplaySecondaryValue = false;
 	m_bIndent = false;
 	m_bIsTime = false;
+	m_nWhiteTexture = -1;
 }
 
 //-----------------------------------------------------------------------------
@@ -154,6 +155,79 @@ void CHudNumericDisplay::PaintLabel( void )
 	surface()->DrawSetTextColor(GetFgColor());
 	surface()->DrawSetTextPos(text_xpos, text_ypos);
 	surface()->DrawUnicodeString( m_LabelText );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: OF2: draws a closed outline as a stroke of icon_stroke thickness, inset
+//			into the shape. Each edge is one quad between the outline and its mitered
+//			inner offset, so neighboring quads share edges and nothing is drawn twice
+//			(no brighter corners with translucent colors).
+//-----------------------------------------------------------------------------
+void CHudNumericDisplay::PaintIconOutline( const Vector2D *pPoints, int nPoints, float flAspect, Color clr )
+{
+	const int MAX_POINTS = 32;
+	if ( nPoints < 3 || nPoints > MAX_POINTS )
+		return;
+
+	if ( m_nWhiteTexture == -1 )
+	{
+		m_nWhiteTexture = surface()->DrawGetTextureId( "vgui/white" );
+		if ( m_nWhiteTexture == -1 )
+		{
+			m_nWhiteTexture = surface()->CreateNewTextureID();
+			surface()->DrawSetTextureFile( m_nWhiteTexture, "vgui/white", true, false );
+		}
+	}
+
+	// Outline in pixels
+	const float flTall = icon_tall;
+	const float flWide = icon_tall * flAspect;
+	Vector2D outer[MAX_POINTS], inner[MAX_POINTS];
+	float flArea = 0.0f;
+	for ( int i = 0; i < nPoints; i++ )
+	{
+		outer[i].Init( icon_xpos + pPoints[i].x * flWide, icon_ypos + pPoints[i].y * flTall );
+	}
+	for ( int i = 0; i < nPoints; i++ )
+	{
+		const Vector2D &a = outer[i], &b = outer[( i + 1 ) % nPoints];
+		flArea += a.x * b.y - b.x * a.y;
+	}
+	const float flSign = ( flArea > 0.0f ) ? 1.0f : -1.0f; // makes the normals point inward
+
+	// Inner outline: each vertex moved inward along the miter of its two edges
+	const float flStroke = MAX( 1.0f, (float)(int)( icon_stroke + 0.5f ) );
+	for ( int i = 0; i < nPoints; i++ )
+	{
+		Vector2D e1 = outer[i] - outer[( i + nPoints - 1 ) % nPoints];
+		Vector2D e2 = outer[( i + 1 ) % nPoints] - outer[i];
+		Vector2DNormalize( e1 );
+		Vector2DNormalize( e2 );
+		Vector2D n1( -e1.y * flSign, e1.x * flSign );
+		Vector2D n2( -e2.y * flSign, e2.x * flSign );
+		float flDenom = MAX( 0.25f, 1.0f + n1.Dot( n2 ) ); // limit very sharp miters
+		inner[i] = outer[i] + ( n1 + n2 ) * ( flStroke / flDenom );
+	}
+
+	// Snap to whole pixels so straight edges stay crisp
+	for ( int i = 0; i < nPoints; i++ )
+	{
+		outer[i].Init( (int)( outer[i].x + 0.5f ), (int)( outer[i].y + 0.5f ) );
+		inner[i].Init( (int)( inner[i].x + 0.5f ), (int)( inner[i].y + 0.5f ) );
+	}
+
+	surface()->DrawSetTexture( m_nWhiteTexture );
+	surface()->DrawSetColor( clr );
+	for ( int i = 0; i < nPoints; i++ )
+	{
+		int j = ( i + 1 ) % nPoints;
+		Vertex_t quad[4];
+		quad[0].Init( outer[i] );
+		quad[1].Init( outer[j] );
+		quad[2].Init( inner[j] );
+		quad[3].Init( inner[i] );
+		surface()->DrawTexturedPolygon( 4, quad );
+	}
 }
 
 //-----------------------------------------------------------------------------

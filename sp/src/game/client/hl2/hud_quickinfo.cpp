@@ -60,7 +60,7 @@ public:
 	virtual void ApplySchemeSettings( IScheme *scheme );
 private:
 	
-	void	DrawWarning( int x, int y, CHudTexture *icon, float &time );
+	void	DrawWarning( int x, int y, bool bLeft, Color clrWarn, float &time );
 	void	UpdateEventTime( void );
 	bool	EventTimeElapsed( void );
 
@@ -87,6 +87,8 @@ private:
 	CHudTexture	*m_icon_lb;		// left bracket, full
 	CHudTexture	*m_icon_rbe;	// right bracket, empty
 	CHudTexture	*m_icon_lbe;	// left bracket, empty
+
+	Color	m_clrCritical;		// OF2: low health is red; low ammo stays gHUD.m_clrCaution (amber)
 };
 
 DECLARE_HUDELEMENT( CHUDQuickInfo );
@@ -103,6 +105,8 @@ CHUDQuickInfo::CHUDQuickInfo( const char *pElementName ) :
 void CHUDQuickInfo::ApplySchemeSettings( IScheme *scheme )
 {
 	BaseClass::ApplySchemeSettings( scheme );
+
+	m_clrCritical = scheme->GetColor( "CriticalFg", Color( 255, 60, 40, 255 ) );
 
 	SetPaintBackgroundEnabled( false );
 	SetForceStereoRenderToFrameBuffer( true );
@@ -140,7 +144,96 @@ void CHUDQuickInfo::VidInit( void )
 }
 
 
-void CHUDQuickInfo::DrawWarning( int x, int y, CHudTexture *icon, float &time )
+//-----------------------------------------------------------------------------
+// OF2: jet-HUD style segmented brackets. Sizes in 640x480 HUD units, scaled by YRES().
+// The pair's outer edges form a box of OF2_BRACKET_ASPECT (width:height) around the crosshair.
+// Segment line and gap sizes are rounded to whole pixels so the spacing is perfectly even;
+// the segment count is however many fit, and the leftover pixels are split above and below.
+//-----------------------------------------------------------------------------
+static const float OF2_BRACKET_WIDE     = 8.0f;        // width of one bracket
+static const float OF2_BRACKET_TALL     = 40.0f;       // bracket height
+static const float OF2_BRACKET_ASPECT   = 5.0f / 3.0f; // width:height of the pair's outer edges
+static const float OF2_SEGMENT_THICK    = 0.5f;        // segment line thickness (>= 1px)
+static const float OF2_SEGMENT_GAP      = 0.25f;       // space between segments (>= 1px)
+static const float OF2_RIM_GAP          = 0.25f;       // space between the segments and the spine/arms (>= 1px)
+static const float OF2_UNLIT_ALPHA      = 0.2f;        // unlit segments' share of the color's alpha
+
+// Whole pixels, at least 1. NOTE: YRES() doesn't parenthesize its argument, so pass plain values.
+static int OF2_Pixels( float flUnits )
+{
+	float flPixels = YRES( flUnits );
+	return MAX( 1, (int)( flPixels + 0.5f ) );
+}
+
+static int OF2_BracketX( int xCenter, bool bLeft )
+{
+	const float flHalfWidth = OF2_BRACKET_TALL * OF2_BRACKET_ASPECT * 0.5f;
+	const int halfWide = OF2_Pixels( flHalfWidth );
+	return bLeft ? xCenter - halfWide
+	             : xCenter + halfWide - OF2_Pixels( OF2_BRACKET_WIDE );
+}
+
+static int OF2_BracketY( float fY )
+{
+	return (int)fY - OF2_Pixels( OF2_BRACKET_TALL ) / 2;
+}
+
+static void DrawSegmentedBracket( int x, int y, bool bLeft, float flFill, Color clr )
+{
+	const int wide = OF2_Pixels( OF2_BRACKET_WIDE );
+	int       tall = OF2_Pixels( OF2_BRACKET_TALL );
+	const int line  = MAX( 1, (int)YRES( 1 ) ); // arm thickness
+	const int spine = line * 2;                  // the spine is twice as thick
+
+	// Segment column: as many whole-pixel segments as fit between the arms, with
+	// OF2_RIM_GAP to the spine and both arms
+	const int segThick = OF2_Pixels( OF2_SEGMENT_THICK );
+	const int segGap   = OF2_Pixels( OF2_SEGMENT_GAP );
+	const int rimGap   = OF2_Pixels( OF2_RIM_GAP );
+	const int pitch    = segThick + segGap;
+	const int column   = tall - 2 * ( line + rimGap ); // n segments take n * pitch - segGap
+	const int nSegments = ( column + segGap ) / pitch;
+	if ( nSegments < 1 )
+		return;
+
+	// Give up the leftover pixels (less than one pitch) so the rim gap is exact
+	// top and bottom, keeping the bracket centered
+	const int leftover = column - ( nSegments * pitch - segGap );
+	y    += leftover / 2;
+	tall -= leftover;
+
+	// Frame: full-height spine plus arms that stop at the spine, so the
+	// translucent color is never drawn twice in the corners
+	vgui::surface()->DrawSetColor( clr );
+	const int spineX = bLeft ? x : x + wide - spine;
+	const int armX0  = bLeft ? x + spine : x;
+	const int armX1  = bLeft ? x + wide : x + wide - spine;
+	vgui::surface()->DrawFilledRect( spineX, y, spineX + spine, y + tall );
+	vgui::surface()->DrawFilledRect( armX0, y, armX1, y + line );
+	vgui::surface()->DrawFilledRect( armX0, y + tall - line, armX1, y + tall );
+
+	const int bottom = y + tall - line - rimGap; // bottom edge of the lowest segment
+
+	// Segments start at the rim gap from the spine and end a spine's width short
+	// of the arm tips (the bracket's inner edge)
+	const int segLen = MAX( 1, wide - 2 * spine - rimGap );
+	const int nLit  = (int)( clamp( flFill, 0.0f, 1.0f ) * nSegments + 0.5f );
+	const int segX0 = bLeft ? x + spine + rimGap : x + spine;
+	const int segX1 = segX0 + segLen;
+
+	Color unlit = clr;
+	unlit[3] = (unsigned char)( clr[3] * OF2_UNLIT_ALPHA );
+
+	for ( int i = 0; i < nSegments; i++ ) // i = 0 is the bottom segment
+	{
+		int segBottom = bottom - i * pitch;
+
+		vgui::surface()->DrawSetColor( i < nLit ? clr : unlit );
+		vgui::surface()->DrawFilledRect( segX0, segBottom - segThick, segX1, segBottom );
+	}
+}
+
+void CHUDQuickInfo::DrawWarning( int x, int y, bool bLeft, Color clrWarn, float &time )
 {
 	float scale	= (int)( fabs(sin(gpGlobals->curtime*8.0f)) * 128.0);
 
@@ -158,13 +251,14 @@ void CHUDQuickInfo::DrawWarning( int x, int y, CHudTexture *icon, float &time )
 			time += (gpGlobals->frametime * 200.0f);
 		}
 	}
-	
+
 	// Update our time
 	time -= (gpGlobals->frametime * 200.0f);
-	Color caution = gHUD.m_clrCaution;
-	caution[3] = scale * 255;
+	Color caution = clrWarn;
+	// Valve had `scale * 255` here, which overflows the 0-255 alpha (scale goes up to 128)
+	caution[3] = (unsigned char)MIN( 255, (int)( scale * 2.0f ) );
 
-	icon->DrawSelf( x, y, caution );
+	DrawSegmentedBracket( x, y, bLeft, 1.0f, caution ); // full bracket, blinking
 }
 
 //-----------------------------------------------------------------------------
@@ -331,31 +425,31 @@ void CHUDQuickInfo::Paint()
 	// Update our health
 	if ( m_healthFade > 0.0f )
 	{
-		DrawWarning( xCenter - (m_icon_lb->Width() * 2), yCenter, m_icon_lb, m_healthFade );
+		DrawWarning( OF2_BracketX( xCenter, true ), OF2_BracketY( fY ), true, m_clrCritical, m_healthFade );
 	}
 	else
 	{
 		float healthPerc = (float) health / 100.0f;
 		healthPerc = clamp( healthPerc, 0.0f, 1.0f );
 
-		Color healthColor = m_warnHealth ? gHUD.m_clrCaution : gHUD.m_clrNormal;
+		Color healthColor = m_warnHealth ? m_clrCritical : gHUD.m_clrNormal;
 		
 		if ( m_warnHealth )
 		{
-			healthColor[3] = 255 * sinScale;
+			healthColor[3] = (unsigned char)MIN( 255, sinScale * 2 ); // was 255 * sinScale, overflowed
 		}
 		else
 		{
 			healthColor[3] = 255 * scalar;
 		}
-		
-		gHUD.DrawIconProgressBar( xCenter - (m_icon_lb->Width() * 2), yCenter, m_icon_lb, m_icon_lbe, ( 1.0f - healthPerc ), healthColor, CHud::HUDPB_VERTICAL );
+
+		DrawSegmentedBracket( OF2_BracketX( xCenter, true ), OF2_BracketY( fY ), true, healthPerc, healthColor );
 	}
 
 	// Update our ammo
 	if ( m_ammoFade > 0.0f )
 	{
-		DrawWarning( xCenter + m_icon_rb->Width(), yCenter, m_icon_rb, m_ammoFade );
+		DrawWarning( OF2_BracketX( xCenter, false ), OF2_BracketY( fY ), false, gHUD.m_clrCaution, m_ammoFade );
 	}
 	else
 	{
@@ -375,14 +469,15 @@ void CHUDQuickInfo::Paint()
 		
 		if ( m_warnAmmo )
 		{
-			ammoColor[3] = 255 * sinScale;
+			ammoColor[3] = (unsigned char)MIN( 255, sinScale * 2 ); // was 255 * sinScale, overflowed
 		}
 		else
 		{
 			ammoColor[3] = 255 * scalar;
 		}
-		
-		gHUD.DrawIconProgressBar( xCenter + m_icon_rb->Width(), yCenter, m_icon_rb, m_icon_rbe, ammoPerc, ammoColor, CHud::HUDPB_VERTICAL );
+
+		// Valve's ammoPerc is the EMPTY fraction, hence 1.0f - ammoPerc
+		DrawSegmentedBracket( OF2_BracketX( xCenter, false ), OF2_BracketY( fY ), false, 1.0f - ammoPerc, ammoColor );
 	}
 }
 

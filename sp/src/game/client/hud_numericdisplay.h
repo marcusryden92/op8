@@ -43,6 +43,10 @@ protected:
 
 	virtual void PaintNumbers(vgui::HFont font, int xpos, int ypos, int value);
 
+	// OF2: vector icons in place of text labels. pPoints is a closed outline in
+	// 0..1 units of the icon box (icon_xpos/icon_ypos, icon_tall high, flAspect * icon_tall wide).
+	void PaintIconOutline( const Vector2D *pPoints, int nPoints, float flAspect, Color clr );
+
 protected:
 
 	int m_iValue;
@@ -67,6 +71,14 @@ protected:
 	CPanelAnimationVarAliasType( float, digit_ypos, "digit_ypos", "2", "proportional_float" );
 	CPanelAnimationVarAliasType( float, digit2_xpos, "digit2_xpos", "98", "proportional_float" );
 	CPanelAnimationVarAliasType( float, digit2_ypos, "digit2_ypos", "16", "proportional_float" );
+
+	CPanelAnimationVarAliasType( float, icon_xpos, "icon_xpos", "8", "proportional_float" );
+	CPanelAnimationVarAliasType( float, icon_ypos, "icon_ypos", "10", "proportional_float" );
+	CPanelAnimationVarAliasType( float, icon_tall, "icon_tall", "18", "proportional_float" );
+	CPanelAnimationVarAliasType( float, icon_stroke, "icon_stroke", "1.5", "proportional_float" );
+
+private:
+	int m_nWhiteTexture;
 };
 
 

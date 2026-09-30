@@ -51,6 +51,9 @@ public:
 	virtual void OnThink();
 			void MsgFunc_Damage( bf_read &msg );
 
+protected:
+	virtual void PaintLabel();
+
 private:
 	// old variables
 	int		m_iHealth;
@@ -105,6 +108,21 @@ void CHudHealth::Reset()
 void CHudHealth::VidInit()
 {
 	Reset();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: OF2: outlined plus sign instead of the "HEALTH" label
+//-----------------------------------------------------------------------------
+void CHudHealth::PaintLabel()
+{
+	const float a = 1.0f / 3.0f, b = 2.0f / 3.0f; // arm edges
+	static const Vector2D s_Plus[] =
+	{
+		Vector2D( a, 0 ), Vector2D( b, 0 ), Vector2D( b, a ), Vector2D( 1, a ),
+		Vector2D( 1, b ), Vector2D( b, b ), Vector2D( b, 1 ), Vector2D( a, 1 ),
+		Vector2D( a, b ), Vector2D( 0, b ), Vector2D( 0, a ), Vector2D( a, a ),
+	};
+	PaintIconOutline( s_Plus, ARRAYSIZE( s_Plus ), 1.0f, GetFgColor() );
 }
 
 //-----------------------------------------------------------------------------

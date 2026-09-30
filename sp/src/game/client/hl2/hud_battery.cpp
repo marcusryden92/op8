@@ -40,7 +40,10 @@ public:
 	void OnThink( void );
 	void MsgFunc_Battery(bf_read &msg );
 	bool ShouldDraw();
-	
+
+protected:
+	virtual void PaintLabel();
+
 private:
 	int		m_iBat;	
 	int		m_iNewBat;
@@ -83,6 +86,21 @@ void CHudBattery::Reset( void )
 void CHudBattery::VidInit( void )
 {
 	Reset();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: OF2: shield outline instead of the "SUIT" label
+//-----------------------------------------------------------------------------
+void CHudBattery::PaintLabel( void )
+{
+	static const Vector2D s_Shield[] =
+	{
+		Vector2D( 0.5f, 0.0f ),  Vector2D( 1.0f, 0.14f ), Vector2D( 1.0f, 0.5f ),
+		Vector2D( 0.93f, 0.7f ), Vector2D( 0.78f, 0.87f ), Vector2D( 0.5f, 1.0f ),
+		Vector2D( 0.22f, 0.87f ), Vector2D( 0.07f, 0.7f ), Vector2D( 0.0f, 0.5f ),
+		Vector2D( 0.0f, 0.14f ),
+	};
+	PaintIconOutline( s_Shield, ARRAYSIZE( s_Shield ), 0.8f, GetFgColor() );
 }
 
 //-----------------------------------------------------------------------------
