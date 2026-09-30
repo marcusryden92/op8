@@ -57,7 +57,7 @@ $Configuration
 	
 	$PreBuildEvent
 	{
-		$CommandLine		"if EXIST $OUTBINDIR\$(TargetFileName) for /f $QUOTEdelims=$QUOTE %%A in ('attrib $QUOTE$OUTBINDIR\$(TargetFileName)$QUOTE') do set valveTmpIsReadOnly=$QUOTE%%A$QUOTE" "\n" \
+		$CommandLine		"if EXIST $QUOTE$OUTBINDIR\$(TargetFileName)$QUOTE for /f $QUOTEdelims=$QUOTE %%A in ('attrib $QUOTE$OUTBINDIR\$(TargetFileName)$QUOTE') do set valveTmpIsReadOnly=$QUOTE%%A$QUOTE" "\n" \
 							"set valveTmpIsReadOnlyLetter=%valveTmpIsReadOnly:~6,1%" "\n" \
 							"if $QUOTE%valveTmpIsReadOnlyLetter%$QUOTE==$QUOTER$QUOTE del /q $QUOTE$(TargetDir)$QUOTE$(TargetFileName)" "\n" \
 							"$CRCCHECK" "\n"
@@ -69,7 +69,7 @@ $Configuration
 		$CommandLine		"$BASE" "call $SRCDIR\vpc_scripts\valve_p4_edit.cmd $QUOTE$OUTBINDIR\$(TargetFileName)$QUOTE $SRCDIR" "\n" [!$SOURCESDK]
 		$CommandLine		"$BASE" "copy $QUOTE$(TargetDir)$(TargetFileName)$QUOTE $QUOTE$OUTBINDIR\$(TargetFileName)$QUOTE" "\n" \
 							"if ERRORLEVEL 1 goto BuildEventFailed" "\n" \
-							"if exist $QUOTE$(TargetDir)$(TargetName).map$QUOTE copy $QUOTE$(TargetDir)$(TargetName).map$QUOTE $OUTBINDIR\$(TargetName).map" "\n" 
+							"if exist $QUOTE$(TargetDir)$(TargetName).map$QUOTE copy $QUOTE$(TargetDir)$(TargetName).map$QUOTE $QUOTE$OUTBINDIR\$(TargetName).map$QUOTE" "\n" 
 		$CommandLine		"$BASE" "call $SRCDIR\vpc_scripts\valve_p4_edit.cmd $QUOTE$OUTBINDIR\$(TargetName).pdb$QUOTE $SRCDIR" "\n"  [!$SOURCESDK] 
 		$CommandLine		"$BASE" "copy $QUOTE$(TargetDir)$(TargetName).pdb$QUOTE $QUOTE$OUTBINDIR\$(TargetName).pdb$QUOTE" "\n" \
 							"if ERRORLEVEL 1 goto BuildEventFailed" "\n" \
@@ -81,10 +81,10 @@ $Configuration
 							":BuildEventOK" "\n" 
 
 		$CommandLine		"$BASE" "\n" \
-							"call $SRCDIR\devtools\bin\vsign.bat -sign $OUTBINDIR\$(TargetFileName)" "\n" [$RETAIL && $PUBLISH]
+							"call $SRCDIR\devtools\bin\vsign.bat -sign $QUOTE$OUTBINDIR\$(TargetFileName)$QUOTE" "\n" [$RETAIL && $PUBLISH]
 
 		$CommandLine		"$BASE" "\n" \
-							"call $SRCDIR\devtools\bin\vsign.bat -signvalve $OUTBINDIR\$(TargetFileName)" "\n" [!$RETAIL && !$PUBLISH && !$SOURCESDK]
+							"call $SRCDIR\devtools\bin\vsign.bat -signvalve $QUOTE$OUTBINDIR\$(TargetFileName)$QUOTE" "\n" [!$RETAIL && !$PUBLISH && !$SOURCESDK]
 
 		$Description		"Publishing to $OUTBINDIR"
 		$ExcludedFromBuild	"No"

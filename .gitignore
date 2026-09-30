@@ -96,3 +96,14 @@ sp/src/vgui2/*.pdb
 
 # Build support files
 sp/src/devtools/gcc9+support.o
+
+# op8: Visual Studio caches anywhere in the tree
+.vs/
+
+# op8: files the game writes into the mod folder at runtime
+sp/game/mod_episodic/save/
+sp/game/mod_episodic/screenshots/
+sp/game/mod_episodic/downloadlists/
+sp/game/mod_episodic/demoheader.tmp
+sp/game/mod_episodic/*.dem
+sp/game/mod_episodic/cfg/server_blacklist.txt
