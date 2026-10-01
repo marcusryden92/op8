@@ -111,7 +111,7 @@ void CHudHealth::VidInit()
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: OF2: outlined plus sign instead of the "HEALTH" label
+// Purpose: OF2: plus sign instead of the "HEALTH" label, filled to the health level
 //-----------------------------------------------------------------------------
 void CHudHealth::PaintLabel()
 {
@@ -122,7 +122,7 @@ void CHudHealth::PaintLabel()
 		Vector2D( 1, b ), Vector2D( b, b ), Vector2D( b, 1 ), Vector2D( a, 1 ),
 		Vector2D( a, b ), Vector2D( 0, b ), Vector2D( 0, a ), Vector2D( a, a ),
 	};
-	PaintIconOutline( s_Plus, ARRAYSIZE( s_Plus ), 1.0f, GetFgColor() );
+	PaintIcon( s_Plus, ARRAYSIZE( s_Plus ), 1.0f, m_iValue / 100.0f, GetFgColor() );
 }
 
 //-----------------------------------------------------------------------------

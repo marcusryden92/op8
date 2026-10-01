@@ -6350,6 +6350,85 @@ void Panel::GetCornerTextureSize( int& w, int& h )
 }
 
 //-----------------------------------------------------------------------------
+// OF2: soft-edged box. One texture holds a quarter of a rounded corner whose
+// alpha fades in over the feather distance; it's drawn mirrored at the four
+// corners, its last row/column is stretched along the edges, and the middle is
+// a plain fill. Every pixel is drawn once.
+//-----------------------------------------------------------------------------
+#define FEATHER_TEXTURE_SIZE	32
+#define FEATHER_CACHE_SIZE		4
+
+// The corner texture for a given feather / (feather + corner radius) ratio
+static int GetFeatherCornerTexture( float flFeatherRatio )
+{
+	static int s_nTextures[FEATHER_CACHE_SIZE] = { -1, -1, -1, -1 };
+	static float s_flRatios[FEATHER_CACHE_SIZE] = { -1.0f, -1.0f, -1.0f, -1.0f };
+	static int s_nNext = 0;
+
+	flFeatherRatio = floorf( flFeatherRatio * 64.0f + 0.5f ) / 64.0f; // don't rebuild for tiny changes
+	for ( int i = 0; i < FEATHER_CACHE_SIZE; i++ )
+	{
+		if ( s_nTextures[i] != -1 && s_flRatios[i] == flFeatherRatio && surface()->IsTextureIDValid( s_nTextures[i] ) )
+			return s_nTextures[i];
+	}
+
+	// Cell = the corner square. The box outline is a quarter circle filling the
+	// cell (centered on its inner corner); alpha ramps up over the feather inside it.
+	const float C = FEATHER_TEXTURE_SIZE;
+	const float F = MAX( 0.5f, flFeatherRatio * C );
+	unsigned char rgba[FEATHER_TEXTURE_SIZE * FEATHER_TEXTURE_SIZE * 4];
+	for ( int j = 0; j < FEATHER_TEXTURE_SIZE; j++ )
+	{
+		for ( int i = 0; i < FEATHER_TEXTURE_SIZE; i++ )
+		{
+			const float dx = C - ( i + 0.5f ), dy = C - ( j + 0.5f );
+			const float s = C - sqrtf( dx * dx + dy * dy ); // distance inside the outline
+			const float t = clamp( s / F, 0.0f, 1.0f );
+			unsigned char *p = &rgba[( j * FEATHER_TEXTURE_SIZE + i ) * 4];
+			p[0] = p[1] = p[2] = 255;
+			p[3] = (unsigned char)( t * t * ( 3.0f - 2.0f * t ) * 255.0f );
+		}
+	}
+
+	const int slot = s_nNext;
+	s_nNext = ( s_nNext + 1 ) % FEATHER_CACHE_SIZE;
+	if ( s_nTextures[slot] == -1 || !surface()->IsTextureIDValid( s_nTextures[slot] ) )
+		s_nTextures[slot] = surface()->CreateNewTextureID( true );
+	surface()->DrawSetTextureRGBA( s_nTextures[slot], rgba, FEATHER_TEXTURE_SIZE, FEATHER_TEXTURE_SIZE, true, true );
+	s_flRatios[slot] = flFeatherRatio;
+	return s_nTextures[slot];
+}
+
+static void DrawFeatheredBox( int x, int y, int wide, int tall, Color color, int feather, int radius )
+{
+	int c = MIN( feather + radius, MIN( wide, tall ) / 2 );
+	if ( c < 1 )
+		return;
+
+	surface()->DrawSetColor( color );
+	surface()->DrawSetTexture( GetFeatherCornerTexture( (float)MIN( feather, c ) / c ) );
+
+	// Texture coordinates stay half a texel inside, so filtering never wraps around
+	const float lo = 0.5f / FEATHER_TEXTURE_SIZE, hi = 1.0f - lo;
+	const int x1 = x + wide, y1 = y + tall;
+
+	// Corners: the texture's inner corner (hi, hi) faces the middle of the box
+	surface()->DrawTexturedSubRect( x, y, x + c, y + c, lo, lo, hi, hi );					// top left
+	surface()->DrawTexturedSubRect( x1 - c, y, x1, y + c, hi, lo, lo, hi );					// top right
+	surface()->DrawTexturedSubRect( x, y1 - c, x + c, y1, lo, hi, hi, lo );					// bottom left
+	surface()->DrawTexturedSubRect( x1 - c, y1 - c, x1, y1, hi, hi, lo, lo );				// bottom right
+
+	// Edges: the corner texture's inner row/column is the plain edge fade
+	surface()->DrawTexturedSubRect( x + c, y, x1 - c, y + c, hi, lo, hi, hi );				// top
+	surface()->DrawTexturedSubRect( x + c, y1 - c, x1 - c, y1, hi, hi, hi, lo );			// bottom
+	surface()->DrawTexturedSubRect( x, y + c, x + c, y1 - c, lo, hi, hi, hi );				// left
+	surface()->DrawTexturedSubRect( x1 - c, y + c, x1, y1 - c, hi, hi, lo, hi );			// right
+
+	// Middle
+	surface()->DrawFilledRect( x + c, y + c, x1 - c, y1 - c );
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: draws a selection box
 //-----------------------------------------------------------------------------
 void Panel::DrawBox(int x, int y, int wide, int tall, Color color, float normalizedAlpha, bool hollow /*=false*/ )
@@ -6367,6 +6446,16 @@ void Panel::DrawBox(int x, int y, int wide, int tall, Color color, float normali
 	// work out our bounds
 	int cornerWide, cornerTall;
 	GetCornerTextureSize( cornerWide, cornerTall );
+
+	// OF2: soft edges and/or a custom corner radius, if this panel asks for them.
+	// The fade is at least 1 pixel, which anti-aliases the rounded corners.
+	if ( !hollow && ( m_flBgFeather > 0.0f || m_flBgCornerRadius >= 0.0f ) )
+	{
+		const int feather = MAX( 1, (int)( m_flBgFeather + 0.5f ) );
+		const int radius = ( m_flBgCornerRadius >= 0.0f ) ? (int)( m_flBgCornerRadius + 0.5f ) : cornerWide;
+		DrawFeatheredBox( x, y, wide, tall, color, feather, radius );
+		return;
+	}
 
 	// draw the background in the areas not occupied by the corners
 	// draw it in three horizontal strips

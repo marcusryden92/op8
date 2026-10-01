@@ -34,7 +34,7 @@ extern ConVar crosshair;
 
 #define QUICKINFO_EVENT_DURATION	1.0f
 #define	QUICKINFO_BRIGHTNESS_FULL	255
-#define	QUICKINFO_BRIGHTNESS_DIM	64
+#define	QUICKINFO_BRIGHTNESS_DIM	180	// OF2: was 64, which made the brackets vanish outdoors
 #define	QUICKINFO_FADE_IN_TIME		0.5f
 #define QUICKINFO_FADE_OUT_TIME		2.0f
 
@@ -157,6 +157,7 @@ static const float OF2_SEGMENT_THICK    = 0.5f;        // segment line thickness
 static const float OF2_SEGMENT_GAP      = 0.25f;       // space between segments (>= 1px)
 static const float OF2_RIM_GAP          = 0.25f;       // space between the segments and the spine/arms (>= 1px)
 static const float OF2_UNLIT_ALPHA      = 0.2f;        // unlit segments' share of the color's alpha
+static const float OF2_SCANLINE_DIM     = 0.7f;        // dimmed rows' share of the alpha, like the fonts' "scanlines" "2"
 
 // Whole pixels, at least 1. NOTE: YRES() doesn't parenthesize its argument, so pass plain values.
 static int OF2_Pixels( float flUnits )
@@ -176,6 +177,115 @@ static int OF2_BracketX( int xCenter, bool bLeft )
 static int OF2_BracketY( float fY )
 {
 	return (int)fY - OF2_Pixels( OF2_BRACKET_TALL ) / 2;
+}
+
+// Filled rect drawn one pixel row at a time, with every other row dimmed (scanlines).
+// Rows with ( y & 1 ) == iBrightParity are full brightness. Each row is drawn once,
+// so translucent colors don't stack.
+static void OF2_FillRectScanlined( int x0, int y0, int x1, int y1, Color clr, int iBrightParity )
+{
+	Color dim = clr;
+	dim[3] = (unsigned char)( clr[3] * OF2_SCANLINE_DIM );
+
+	for ( int row = y0; row < y1; row++ )
+	{
+		vgui::surface()->DrawSetColor( ( row & 1 ) == iBrightParity ? clr : dim );
+		vgui::surface()->DrawFilledRect( x0, row, x1, row + 1 );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// OF2: soft glow under a bracket. The lit parts (frame and lit segments) are
+// rasterized and blurred into a white texture, rebuilt only when the bracket's
+// shape or lit count changes; color and blinking come from the draw color.
+//-----------------------------------------------------------------------------
+static const float OF2_GLOW_STRENGTH	= 0.18f;	// glow alpha as a share of the bracket's
+static const int   OF2_BACKDROP_ALPHA	= 96;		// black behind each segment stack, about 38%
+static const float OF2_GLOW_RADIUS		= 1.0f;		// blur radius (HUD units)
+static const float OF2_GLOW_GAIN		= 1.6f;		// the blur spreads the light thin; bring it back up
+#define OF2_GLOW_MAX_RECTS	128
+
+struct BracketGlow_t
+{
+	int nTexture;
+	int key[6];
+	int texWide, texTall, margin;
+};
+
+static void OF2_BoxBlur( float *pData, int wide, int tall, int r, bool bColumns )
+{
+	const int nLines = bColumns ? wide : tall, nLen = bColumns ? tall : wide, step = bColumns ? wide : 1;
+	CUtlVector<float> line;
+	line.SetCount( nLen );
+	for ( int l = 0; l < nLines; l++ )
+	{
+		float *p = bColumns ? pData + l : pData + l * wide;
+		for ( int i = 0; i < nLen; i++ )
+			line[i] = p[i * step];
+		for ( int i = 0; i < nLen; i++ )
+		{
+			float flSum = 0.0f;
+			for ( int k = MAX( 0, i - r ); k <= MIN( nLen - 1, i + r ); k++ )
+				flSum += line[k];
+			p[i * step] = flSum / ( 2 * r + 1 );
+		}
+	}
+}
+
+// pRects: x0, y0, x1, y1 relative to the bracket's top left
+static void OF2_DrawBracketGlow( bool bLeft, int x, int y, int wide, int tall, const int (*pRects)[4], int nRects, int nLit, Color clr )
+{
+	static BracketGlow_t s_Glow[2] = { { -1 }, { -1 } };
+	BracketGlow_t &glow = s_Glow[bLeft ? 0 : 1];
+
+	const int r = OF2_Pixels( OF2_GLOW_RADIUS );
+	const int key[6] = { wide, tall, nRects, nLit, r, ScreenHeight() };
+	if ( glow.nTexture == -1 || V_memcmp( key, glow.key, sizeof( key ) ) )
+	{
+		V_memcpy( glow.key, key, sizeof( key ) );
+		glow.margin = 3 * r;
+		const int w = wide + 2 * glow.margin, h = tall + 2 * glow.margin;
+
+		CUtlVector<float> mask;
+		mask.SetCount( w * h );
+		V_memset( mask.Base(), 0, w * h * sizeof( float ) );
+		for ( int i = 0; i < nRects; i++ )
+			for ( int py = pRects[i][1]; py < pRects[i][3]; py++ )
+				for ( int px = pRects[i][0]; px < pRects[i][2]; px++ )
+					mask[( py + glow.margin ) * w + px + glow.margin] = 1.0f;
+
+		for ( int pass = 0; pass < 2; pass++ )
+		{
+			OF2_BoxBlur( mask.Base(), w, h, r, false );
+			OF2_BoxBlur( mask.Base(), w, h, r, true );
+		}
+
+		// Padded to power-of-two sizes, so the texture maps 1:1 to the screen
+		glow.texWide = 1; while ( glow.texWide < w ) glow.texWide <<= 1;
+		glow.texTall = 1; while ( glow.texTall < h ) glow.texTall <<= 1;
+		CUtlVector<unsigned char> rgba;
+		rgba.SetCount( glow.texWide * glow.texTall * 4 );
+		V_memset( rgba.Base(), 0, rgba.Count() );
+		for ( int py = 0; py < h; py++ )
+		{
+			for ( int px = 0; px < w; px++ )
+			{
+				unsigned char *p = &rgba[( py * glow.texWide + px ) * 4];
+				p[0] = p[1] = p[2] = 255;
+				p[3] = (unsigned char)( clamp( mask[py * w + px] * OF2_GLOW_GAIN, 0.0f, 1.0f ) * 255.0f );
+			}
+		}
+
+		if ( glow.nTexture == -1 )
+			glow.nTexture = vgui::surface()->CreateNewTextureID( true );
+		vgui::surface()->DrawSetTextureRGBA( glow.nTexture, rgba.Base(), glow.texWide, glow.texTall, false, true );
+	}
+
+	Color clrGlow = clr;
+	clrGlow[3] = (unsigned char)( clr[3] * OF2_GLOW_STRENGTH );
+	vgui::surface()->DrawSetColor( clrGlow );
+	vgui::surface()->DrawSetTexture( glow.nTexture );
+	vgui::surface()->DrawTexturedRect( x - glow.margin, y - glow.margin, x - glow.margin + glow.texWide, y - glow.margin + glow.texTall );
 }
 
 static void DrawSegmentedBracket( int x, int y, bool bLeft, float flFill, Color clr )
@@ -202,17 +312,17 @@ static void DrawSegmentedBracket( int x, int y, bool bLeft, float flFill, Color 
 	y    += leftover / 2;
 	tall -= leftover;
 
+	const int bottom = y + tall - line - rimGap; // bottom edge of the lowest segment
+
+	// Scanlines are phased so the segment rows are bright: with 1px segments on a
+	// 2px pitch every segment stays at full brightness
+	const int brightParity = ( bottom - 1 ) & 1;
+
 	// Frame: full-height spine plus arms that stop at the spine, so the
 	// translucent color is never drawn twice in the corners
-	vgui::surface()->DrawSetColor( clr );
 	const int spineX = bLeft ? x : x + wide - spine;
 	const int armX0  = bLeft ? x + spine : x;
 	const int armX1  = bLeft ? x + wide : x + wide - spine;
-	vgui::surface()->DrawFilledRect( spineX, y, spineX + spine, y + tall );
-	vgui::surface()->DrawFilledRect( armX0, y, armX1, y + line );
-	vgui::surface()->DrawFilledRect( armX0, y + tall - line, armX1, y + tall );
-
-	const int bottom = y + tall - line - rimGap; // bottom edge of the lowest segment
 
 	// Segments start at the rim gap from the spine and end a spine's width short
 	// of the arm tips (the bracket's inner edge)
@@ -221,6 +331,43 @@ static void DrawSegmentedBracket( int x, int y, bool bLeft, float flFill, Color 
 	const int segX0 = bLeft ? x + spine + rimGap : x + spine;
 	const int segX1 = segX0 + segLen;
 
+	// Faint backdrop behind the segment stack: its corners are the outer corners of
+	// the top and bottom segments. Constant (it doesn't blink).
+	{
+		const int stackTop = bottom - ( nSegments - 1 ) * pitch - segThick;
+		vgui::surface()->DrawSetColor( Color( 0, 0, 0, OF2_BACKDROP_ALPHA ) );
+		vgui::surface()->DrawFilledRect( segX0, stackTop, segX1, bottom );
+	}
+
+	// 1 pixel line just outside the spine, in the crosshair's dark core color
+	{
+		static ConVarRef of2_crosshair_core_shade( "of2_crosshair_core_shade" );
+		const float flShade = of2_crosshair_core_shade.IsValid() ? clamp( of2_crosshair_core_shade.GetFloat(), 0.0f, 1.0f ) : 0.715f;
+		const Color normal = gHUD.m_clrNormal;
+		const Color clrLine( normal[0] * flShade, normal[1] * flShade, normal[2] * flShade, clr[3] );
+		const int lineX = bLeft ? x - 1 : x + wide;
+		OF2_FillRectScanlined( lineX, y, lineX + 1, y + tall, clrLine, brightParity );
+	}
+
+	// Glow under the lit parts: the frame and the lit segments
+	{
+		int rects[OF2_GLOW_MAX_RECTS][4];
+		int nRects = 0;
+		rects[nRects][0] = spineX - x;	rects[nRects][1] = 0;				rects[nRects][2] = spineX + spine - x;	rects[nRects][3] = tall;	nRects++;
+		rects[nRects][0] = armX0 - x;	rects[nRects][1] = 0;				rects[nRects][2] = armX1 - x;			rects[nRects][3] = line;	nRects++;
+		rects[nRects][0] = armX0 - x;	rects[nRects][1] = tall - line;		rects[nRects][2] = armX1 - x;			rects[nRects][3] = tall;	nRects++;
+		for ( int i = 0; i < nLit && nRects < OF2_GLOW_MAX_RECTS; i++ )
+		{
+			const int segBottom = bottom - i * pitch - y;
+			rects[nRects][0] = segX0 - x;	rects[nRects][1] = segBottom - segThick;	rects[nRects][2] = segX1 - x;	rects[nRects][3] = segBottom;	nRects++;
+		}
+		OF2_DrawBracketGlow( bLeft, x, y, wide, tall, rects, nRects, nLit, clr );
+	}
+
+	OF2_FillRectScanlined( spineX, y, spineX + spine, y + tall, clr, brightParity );
+	OF2_FillRectScanlined( armX0, y, armX1, y + line, clr, brightParity );
+	OF2_FillRectScanlined( armX0, y + tall - line, armX1, y + tall, clr, brightParity );
+
 	Color unlit = clr;
 	unlit[3] = (unsigned char)( clr[3] * OF2_UNLIT_ALPHA );
 
@@ -228,8 +375,7 @@ static void DrawSegmentedBracket( int x, int y, bool bLeft, float flFill, Color 
 	{
 		int segBottom = bottom - i * pitch;
 
-		vgui::surface()->DrawSetColor( i < nLit ? clr : unlit );
-		vgui::surface()->DrawFilledRect( segX0, segBottom - segThick, segX1, segBottom );
+		OF2_FillRectScanlined( segX0, segBottom - segThick, segX1, segBottom, i < nLit ? clr : unlit, brightParity );
 	}
 }
 
@@ -350,9 +496,8 @@ void CHUDQuickInfo::Paint()
 		return;
 
 	int		xCenter	= (int)fX;
-	int		yCenter = (int)fY - m_icon_lb->Height() / 2;
 
-	float	scalar  = 138.0f/255.0f;
+	float	scalar  = 230.0f/255.0f;	// OF2: was 138, too faint against bright scenes
 	
 	// Check our health for a warning
 	int	health	= player->GetHealth();
@@ -406,9 +551,7 @@ void CHUDQuickInfo::Paint()
 		}
 	}
 
-	Color clrNormal = gHUD.m_clrNormal;
-	clrNormal[3] = 255 * scalar;
-	m_icon_c->DrawSelf( xCenter, yCenter, clrNormal );
+	// OF2: no center dot here; the crosshair (hud_crosshair.cpp, of2_crosshair_dot) has its own
 
 	if( IsX360() )
 	{

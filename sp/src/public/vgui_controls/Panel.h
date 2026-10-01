@@ -923,6 +923,13 @@ private:
 	CPanelAnimationVarAliasType( int, m_nBgTextureId3, "Texture3", "vgui/hud/800corner3", "textureid" );
 	CPanelAnimationVarAliasType( int, m_nBgTextureId4, "Texture4", "vgui/hud/800corner4", "textureid" );
 
+	// OF2: soft edges for DrawBox (the rounded background box). The box fades in
+	// over this distance from its edges. 0 = HL2's hard-edged box.
+	CPanelAnimationVarAliasType( float, m_flBgFeather, "BgFeather", "0", "proportional_float" );
+	// OF2: corner radius for that box. Negative = HL2's corner texture size.
+	// Setting it (even with BgFeather 0) draws the box with 1 pixel anti-aliased edges.
+	CPanelAnimationVarAliasType( float, m_flBgCornerRadius, "BgCornerRadius", "-1", "proportional_float" );
+
 	//=============================================================================
 	// HPE_BEGIN:
 	// [tj] A bitset of flags to determine which corners should be rounded

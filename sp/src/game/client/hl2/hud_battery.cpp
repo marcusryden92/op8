@@ -89,7 +89,7 @@ void CHudBattery::VidInit( void )
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: OF2: shield outline instead of the "SUIT" label
+// Purpose: OF2: shield instead of the "SUIT" label, filled to the armor level
 //-----------------------------------------------------------------------------
 void CHudBattery::PaintLabel( void )
 {
@@ -100,7 +100,7 @@ void CHudBattery::PaintLabel( void )
 		Vector2D( 0.22f, 0.87f ), Vector2D( 0.07f, 0.7f ), Vector2D( 0.0f, 0.5f ),
 		Vector2D( 0.0f, 0.14f ),
 	};
-	PaintIconOutline( s_Shield, ARRAYSIZE( s_Shield ), 0.8f, GetFgColor() );
+	PaintIcon( s_Shield, ARRAYSIZE( s_Shield ), 0.8f, m_iValue / 100.0f, GetFgColor() );
 }
 
 //-----------------------------------------------------------------------------

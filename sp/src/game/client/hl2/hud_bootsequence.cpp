@@ -196,9 +196,15 @@ private:
 
 	CPanelAnimationVar( vgui::HFont, m_hFont, "TextFont", "HudBootText" );
 	CPanelAnimationVar( Color, m_TextColor, "TextColor", "FgColor" );
+	CPanelAnimationVar( Color, m_BoxColor, "BoxColor", "BgColor" ); // HL2-style dark box behind the text, like the other HUD panels; alpha 0 = none
+	CPanelAnimationVarAliasType( float, m_flTextPadding, "TextPadding", "12", "proportional_float" ); // box edge to text; keep it above BgFeather
+
+	int		m_iTextX;	// text inset from the box edge
 };
 
 DECLARE_HUDELEMENT( CHudBootSequence );
+
+static ConVar suit_bootsequence_auto( "suit_bootsequence_auto", "0", FCVAR_ARCHIVE, "Play the suit boot sequence automatically when the suit comes online (otherwise only via suit_bootsequence)" );
 
 CON_COMMAND( suit_bootsequence, "Plays the suit boot sequence (reloads " BOOT_SCRIPT_FILE ")" )
 {
@@ -226,6 +232,7 @@ CHudBootSequence::CHudBootSequence( const char *pElementName ) :
 	m_flPhaseStart = 0.0f;
 	m_flScroll = 0.0f;
 	m_iSuitState = -1;
+	m_iTextX = 0;
 }
 
 //-----------------------------------------------------------------------------
@@ -261,7 +268,7 @@ bool CHudBootSequence::ShouldDraw( void )
 	if ( pPlayer )
 	{
 		int iSuitState = pPlayer->IsSuitEquipped() ? 1 : 0;
-		if ( m_iSuitState == 0 && iSuitState == 1 )
+		if ( m_iSuitState == 0 && iSuitState == 1 && suit_bootsequence_auto.GetBool() )
 		{
 			Start();
 		}
@@ -559,12 +566,22 @@ void CHudBootSequence::Paint( void )
 		return;
 
 	const int lineTall = surface()->GetFontTall( m_hFont );
+
+	// HL2-style dark box: the whole panel, from the first line on, fading out with
+	// the text. The text sits inside it, inset by the padding; lines scrolling away
+	// fade out in the top padding.
+	const int pad = (int)m_flTextPadding;
+	m_iTextX = pad;
+	if ( m_BoxColor[3] > 0 )
+	{
+		DrawBox( 0, 0, GetWide(), GetTall(), m_BoxColor, flAlpha );
+	}
 	const int nShown = m_iLine + 1;
 
 	for ( int i = MAX( 0, (int)m_flScroll - 1 ); i < nShown; i++ )
 	{
-		// Position in lines from the top; the first slot is headroom where
-		// lines fade out as they scroll away
+		// Position in lines from the top of the text area; lines scrolling away
+		// (negative positions) fade out in the top padding
 		float flPos = i - m_flScroll;
 		if ( flPos <= -1.0f )
 			continue;
@@ -578,7 +595,7 @@ void CHudBootSequence::Paint( void )
 
 		if ( flLineAlpha > 0.0f )
 		{
-			PaintLine( (int)( ( flPos + 1.0f ) * lineTall ), i, flLineAlpha );
+			PaintLine( pad + (int)( flPos * lineTall ), i, flLineAlpha );
 		}
 	}
 }
@@ -607,7 +624,7 @@ void CHudBootSequence::PaintLine( int y, int iLine, float flAlpha )
 	{
 		nChars = clamp( (int)( flElapsed * line.flTypeRate ), 0, nLen );
 	}
-	surface()->DrawSetTextPos( 0, y );
+	surface()->DrawSetTextPos( m_iTextX, y );
 	surface()->DrawPrintText( line.szText, nChars );
 	int column = nChars;
 
@@ -627,7 +644,7 @@ void CHudBootSequence::PaintLine( int y, int iLine, float flAlpha )
 		}
 
 		column = MAX( nLen + 1, m_nBarColumn );
-		surface()->DrawSetTextPos( column * charWide, y );
+		surface()->DrawSetTextPos( m_iTextX + column * charWide, y );
 		surface()->DrawPrintText( szBar, nSteps );
 		column += nSteps;
 	}
@@ -635,7 +652,7 @@ void CHudBootSequence::PaintLine( int y, int iLine, float flAlpha )
 	// Result
 	if ( line.szResult[0] && ( !bCurrent || m_iPhase == PHASE_PAUSE ) )
 	{
-		surface()->DrawSetTextPos( column * charWide, y );
+		surface()->DrawSetTextPos( m_iTextX + column * charWide, y );
 		surface()->DrawPrintText( L"; ", 2 );
 		column += 2;
 
@@ -656,7 +673,7 @@ void CHudBootSequence::PaintLine( int y, int iLine, float flAlpha )
 	// Blinking cursor on the active line
 	if ( bCurrent && ( (int)( gpGlobals->curtime * 4.0f ) & 1 ) == 0 )
 	{
-		surface()->DrawSetTextPos( column * charWide, y );
+		surface()->DrawSetTextPos( m_iTextX + column * charWide, y );
 		surface()->DrawPrintText( L"_", 1 );
 	}
 }

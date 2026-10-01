@@ -12,6 +12,10 @@
 
 #include <vgui_controls/Panel.h>
 
+// OF2: soft dark rounded-rect shade behind HUD elements, fading out toward the
+// edges of the rect. flAlpha is the darkness at the center (0..255).
+void OF2_PaintBackdrop( int x0, int y0, int x1, int y1, float flAlpha );
+
 //-----------------------------------------------------------------------------
 // Purpose: Base class for all the hud elements that are just a numeric display
 //			with some options for text and icons
@@ -43,9 +47,11 @@ protected:
 
 	virtual void PaintNumbers(vgui::HFont font, int xpos, int ypos, int value);
 
-	// OF2: vector icons in place of text labels. pPoints is a closed outline in
-	// 0..1 units of the icon box (icon_xpos/icon_ypos, icon_tall high, flAspect * icon_tall wide).
-	void PaintIconOutline( const Vector2D *pPoints, int nPoints, float flAspect, Color clr );
+	// OF2: vector icons in place of text labels. pPoints is a closed outline in 0..1
+	// units of the icon box, which is flAspect times as wide as it is tall. Drawn as
+	// scanlined pixel rows: the outline, plus horizontal segments inside it lit from
+	// the bottom up to flFill (0..1), like the crosshair brackets.
+	void PaintIcon( const Vector2D *pPoints, int nPoints, float flAspect, float flFill, Color clr );
 
 protected:
 
@@ -72,13 +78,26 @@ protected:
 	CPanelAnimationVarAliasType( float, digit2_xpos, "digit2_xpos", "98", "proportional_float" );
 	CPanelAnimationVarAliasType( float, digit2_ypos, "digit2_ypos", "16", "proportional_float" );
 
+	// Icon box. icon_tall 0 = match the digits: sit on their baseline, icon_digit_ratio
+	// of the number font's height tall (0.62 is Share Tech Mono's digit height).
 	CPanelAnimationVarAliasType( float, icon_xpos, "icon_xpos", "8", "proportional_float" );
 	CPanelAnimationVarAliasType( float, icon_ypos, "icon_ypos", "10", "proportional_float" );
-	CPanelAnimationVarAliasType( float, icon_tall, "icon_tall", "18", "proportional_float" );
+	CPanelAnimationVarAliasType( float, icon_tall, "icon_tall", "0", "proportional_float" );
 	CPanelAnimationVarAliasType( float, icon_stroke, "icon_stroke", "1.5", "proportional_float" );
+	CPanelAnimationVarAliasType( float, icon_corner_radius, "icon_corner_radius", "0.75", "proportional_float" ); // 0 = sharp
+	CPanelAnimationVar( float, m_flIconDigitRatio, "icon_digit_ratio", "0.62" );
+	CPanelAnimationVar( float, m_flBackdropAlpha, "backdrop_alpha", "0" ); // OF2 dark shade behind the panel, 0 = none
+	// Icon glow: strength at the digits' resting Blur (it pulses with Blur like the digit glow), and radius
+	CPanelAnimationVar( float, m_flIconGlow, "icon_glow", "0.6" );
+	CPanelAnimationVarAliasType( float, icon_glow_radius, "icon_glow_radius", "1.5", "proportional_float" );
 
 private:
-	int m_nWhiteTexture;
+	// The icon is rasterized into two textures (shape, glow) that are rebuilt only
+	// when what they show changes (m_IconKey)
+	int m_nIconTexture;
+	int m_nIconGlowTexture;
+	int m_IconKey[8];
+	int m_iIconX, m_iIconY, m_iIconWide, m_iIconTall;
 };
 
 
