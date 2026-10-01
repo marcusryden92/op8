@@ -1,0 +1,8 @@
+//
+// OF2: the only shaders the mod compiles itself (buildof2shaders.bat).
+// The full Mapbase set is in stdshader_dx9_20b.txt; nothing in the mod uses it yet.
+//
+
+// Depth of field (Alien Swarm), used by night vision
+depth_of_field_ps20b.fxc
+depth_of_field_vs20.fxc

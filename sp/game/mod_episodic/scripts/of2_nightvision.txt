@@ -1,0 +1,43 @@
+// OF2 night vision settings (client\hl2\of2_nightvision.cpp).
+//
+// The game reads this file when a map loads and again whenever it is saved, so with
+// night vision on you can edit, save and see the result within half a second.
+// A key that is left out keeps its built-in value.
+//
+// Everything except the "picture" group is also a console variable with the same name
+// prefixed by of2_nightvision_ (grain -> of2_nightvision_grain), for trying values out.
+// Saving this file overwrites whatever was typed in the console; of2_nightvision_reload
+// does the same without saving.
+
+"NightVision"
+{
+	"fade"				"0.3"	// seconds night vision takes to fade in and out
+	"grain"				"0.18"	// strength of the grain over the picture (0 = off)
+
+	// Fill light: a dim light at the eye. Amplifying pure black still gives black,
+	// so this is what shows completely unlit areas.
+	"light"				"0.1"	// brightness (0 = off)
+	"light_range"		"400"	// reach in units; it fades out over the last 40%
+	"light_fov"			"140"	// cone in degrees; keep it wider than the view so its edge stays off screen
+
+	// Depth of field. Radii are in pixels at 1080 lines, and capped by mat_dof_max_blur_radius (50).
+	// The distances are in the shader's own scale (mat_dof_constant), probably not true units,
+	// and the depth it sees ends a few hundred units out. Tune them by eye.
+	"dof"				"1"		// 0 = no depth of field
+	"dof_far_radius"	"20"	// strength of the blur in the distance (0 = none)
+	"dof_far_focus"		"500"	// the far blur starts here
+	"dof_far_blur"		"600"	// fully blurred from here on
+	"dof_near_radius"	"20"	// strength of the blur up close (0 = none)
+	"dof_near_blur"		"8"		// fully blurred closer than this
+	"dof_near_focus"	"100"	// the near blur is gone by here; the far blur can't start closer
+
+	// Picture: how scene brightness (0 = black, 1 = white) becomes picture brightness.
+	// Changing any of these makes the game rebuild materials\correction\of2_nightvision.raw.
+	"gamma"				"0.40"	// amplification, out = in ^ gamma. Lower lifts dark areas more.
+	"ceiling"			"0.92"	// level the amplification tops out at, before the blow-out
+	"knee"				"0.20"	// scene brightness where highlights start to blow out; darker areas are untouched
+	"white_point"		"0.50"	// scene brightness that is pure white, and everything above it.
+								// Lower = more of the picture overexposed. knee and white_point both 1 = no blow-out.
+	"tint_dark"			"1 1 1"	// color of dim areas, R G B. Both tints white = grayscale.
+	"tint_light"		"1 1 1"	// color of bright areas. (The old green was 0.06 1 0.40 and 0.70 1 0.78.)
+}

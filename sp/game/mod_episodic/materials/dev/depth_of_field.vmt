@@ -1,0 +1,7 @@
+// OF2: Alien Swarm's depth of field pass (DepthOfField shader in game_shader_dx9.dll).
+// viewpostprocess.cpp fills in the focus distances and blur radii every frame.
+"DepthOfField"
+{
+	"$basetexture"	"_rt_FullFrameFB"
+	"$smallfb"	"_rt_SmallFB1"
+}

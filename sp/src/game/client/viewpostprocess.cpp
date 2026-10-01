@@ -3322,6 +3322,12 @@ bool IsDepthOfFieldEnabled()
 	if ( !mat_dof_enabled.GetBool() )
 		return false;
 
+#ifdef HL2_EPISODIC
+	// OF2: night vision has its own depth of field, whatever the map says
+	if ( OF2_NightVisionGetDepthOfField( NULL ) )
+		return true;
+#endif
+
 	if ( mat_dof_override.GetBool() == true )
 	{
 		return mat_dof_enabled.GetBool();
@@ -3450,6 +3456,20 @@ void DoDepthOfField( const CViewSetup &viewSetup )
 	SetMaterialVarFloat( pMatDOF, "$nearBlurRadius", GetNearBlurRadius() );
 	SetMaterialVarFloat( pMatDOF, "$farBlurRadius", GetFarBlurRadius() );
 	SetMaterialVarInt( pMatDOF, "$quality", mat_dof_quality.GetInt() );
+
+#ifdef HL2_EPISODIC
+	// OF2: night vision's focus settings replace the map's while it is on
+	OF2DepthOfField_t nightVisionDOF;
+	if ( OF2_NightVisionGetDepthOfField( &nightVisionDOF ) )
+	{
+		SetMaterialVarFloat( pMatDOF, "$nearBlurDepth", nightVisionDOF.flNearBlurDepth );
+		SetMaterialVarFloat( pMatDOF, "$nearFocusDepth", nightVisionDOF.flNearFocusDepth );
+		SetMaterialVarFloat( pMatDOF, "$farFocusDepth", nightVisionDOF.flFarFocusDepth );
+		SetMaterialVarFloat( pMatDOF, "$farBlurDepth", nightVisionDOF.flFarBlurDepth );
+		SetMaterialVarFloat( pMatDOF, "$nearBlurRadius", nightVisionDOF.flNearBlurRadius );
+		SetMaterialVarFloat( pMatDOF, "$farBlurRadius", nightVisionDOF.flFarBlurRadius );
+	}
+#endif
 
 	pRenderContext->DrawScreenSpaceRectangle(
 		pMatDOF,
