@@ -21,6 +21,10 @@
 
 //-----------------------------------------------------------------------------
 // Purpose: Shows the flashlight icon
+//			OF2: night vision took over the flashlight's key and battery, so this
+//			is now the night vision indicator: a label over a battery bar.
+//			The panel keeps its name because HudLayout.res and the HUD
+//			animations refer to it.
 //-----------------------------------------------------------------------------
 class CHudFlashlight : public CHudElement, public vgui::Panel
 {
@@ -38,18 +42,18 @@ private:
 	void Reset( void );
 	
 	bool	m_bFlashlightOn;
-	CPanelAnimationVar( vgui::HFont, m_hFont, "Font", "WeaponIconsSmall" );
-	CPanelAnimationVarAliasType( float, m_IconX, "icon_xpos", "4", "proportional_float" );
-	CPanelAnimationVarAliasType( float, m_IconY, "icon_ypos", "4", "proportional_float" );
-	
-	CPanelAnimationVarAliasType( float, m_flBarInsetX, "BarInsetX", "2", "proportional_float" );
-	CPanelAnimationVarAliasType( float, m_flBarInsetY, "BarInsetY", "18", "proportional_float" );
 
-	CPanelAnimationVarAliasType( float, m_flBarWidth, "BarWidth", "28", "proportional_float" );
-	CPanelAnimationVarAliasType( float, m_flBarHeight, "BarHeight", "2", "proportional_float" );
-	CPanelAnimationVarAliasType( float, m_flBarChunkWidth, "BarChunkWidth", "2", "proportional_float" );
+	// OF2: the label and the bar are both centered in the panel, so there are no x positions
+	CPanelAnimationVar( vgui::HFont, m_hTextFont, "TextFont", "Default" );
+	CPanelAnimationVarAliasType( float, m_flTextY, "text_ypos", "4", "proportional_float" );
+	CPanelAnimationVar( int, m_iDisabledAlpha, "DisabledAlpha", "70" );
+
+	CPanelAnimationVarAliasType( float, m_flBarInsetY, "BarInsetY", "15", "proportional_float" );
+	CPanelAnimationVarAliasType( float, m_flBarHeight, "BarHeight", "4", "proportional_float" );
+	CPanelAnimationVar( int, m_nBarChunks, "BarChunks", "5" );
+	CPanelAnimationVarAliasType( float, m_flBarChunkWidth, "BarChunkWidth", "4", "proportional_float" );
 	CPanelAnimationVarAliasType( float, m_flBarChunkGap, "BarChunkGap", "2", "proportional_float" );
-};	
+};
 
 using namespace vgui;
 
@@ -96,11 +100,8 @@ void CHudFlashlight::SetFlashlightState( bool flashlightOn )
 	m_bFlashlightOn = flashlightOn;
 }
 
-#define WCHAR_FLASHLIGHT_ON  169
-#define WCHAR_FLASHLIGHT_OFF 174
-
 //-----------------------------------------------------------------------------
-// Purpose: draws the flashlight icon
+// Purpose: draws the night vision label and its battery bar
 //-----------------------------------------------------------------------------
 void CHudFlashlight::Paint()
 {
@@ -116,47 +117,52 @@ void CHudFlashlight::Paint()
 		return;
 	}
 
-	bool bIsOn = pPlayer->IsEffectActive( EF_DIMLIGHT );
+	bool bIsOn = pPlayer->m_HL2Local.m_bNightVision;
 	SetFlashlightState( bIsOn );
 
-	// get bar chunks
-	int chunkCount = m_flBarWidth / (m_flBarChunkWidth + m_flBarChunkGap);
+	// OF2: whole-pixel chunks, so they all come out the same size with the same gaps
+	int chunkCount = MAX( 1, m_nBarChunks );
+	int chunkWide = MAX( 1, RoundFloatToInt( m_flBarChunkWidth ) );
+	int chunkGap = MAX( 1, RoundFloatToInt( m_flBarChunkGap ) );
+	int barTall = MAX( 1, RoundFloatToInt( m_flBarHeight ) );
 	int enabledChunks = (int)((float)chunkCount * (pPlayer->m_HL2Local.m_flFlashBattery * 1.0f/100.0f) + 0.5f );
 
-	Color clrFlashlight;
-	clrFlashlight = ( enabledChunks < ( chunkCount / 4 ) ) ? gHUD.m_clrCaution : gHUD.m_clrNormal;
-	clrFlashlight[3] = ( bIsOn ) ? 255: 32;
+	Color clrNightVision;
+	clrNightVision = ( enabledChunks <= ( chunkCount / 4 ) ) ? gHUD.m_clrCaution : gHUD.m_clrNormal;
+	clrNightVision[3] = ( bIsOn ) ? 255 : m_iDisabledAlpha;
 
-	// Pick the right character given our current state
-	wchar_t pState = ( bIsOn ) ? WCHAR_FLASHLIGHT_ON : WCHAR_FLASHLIGHT_OFF;
+	// draw the label
+	const wchar_t *pszLabel = L"NVG";
+	int labelLength = wcslen( pszLabel );
+	int labelWide = 0;
+	for ( int i = 0; i < labelLength; i++ )
+	{
+		labelWide += surface()->GetCharacterWidth( m_hTextFont, pszLabel[i] );
+	}
 
-	surface()->DrawSetTextFont( m_hFont );
-	surface()->DrawSetTextColor( clrFlashlight );
-	surface()->DrawSetTextPos( m_IconX, m_IconY );
-	surface()->DrawUnicodeChar( pState );
+	surface()->DrawSetTextFont( m_hTextFont );
+	surface()->DrawSetTextColor( clrNightVision );
+	surface()->DrawSetTextPos( ( GetWide() - labelWide ) / 2, RoundFloatToInt( m_flTextY ) );
+	surface()->DrawPrintText( pszLabel, labelLength );
 
-	// Don't draw the progress bar is we're fully charged
-	if ( bIsOn == false && chunkCount == enabledChunks )
-		return;
+	// draw the battery bar
+	int barWide = chunkCount * chunkWide + ( chunkCount - 1 ) * chunkGap;
+	int xpos = ( GetWide() - barWide ) / 2, ypos = RoundFloatToInt( m_flBarInsetY );
 
-	// draw the suit power bar
-	surface()->DrawSetColor( clrFlashlight );
-	int xpos = m_flBarInsetX, ypos = m_flBarInsetY;
+	surface()->DrawSetColor( clrNightVision );
 	for (int i = 0; i < enabledChunks; i++)
 	{
-		surface()->DrawFilledRect( xpos, ypos, xpos + m_flBarChunkWidth, ypos + m_flBarHeight );
-		xpos += (m_flBarChunkWidth + m_flBarChunkGap);
+		surface()->DrawFilledRect( xpos, ypos, xpos + chunkWide, ypos + barTall );
+		xpos += (chunkWide + chunkGap);
 	}
-	
-	// Be even less transparent than we already are
-	clrFlashlight[3] = clrFlashlight[3] / 8;
 
 	// draw the exhausted portion of the bar.
-	surface()->DrawSetColor( clrFlashlight );
+	clrNightVision[3] = ( bIsOn ) ? m_iDisabledAlpha : m_iDisabledAlpha / 3;
+	surface()->DrawSetColor( clrNightVision );
 	for (int i = enabledChunks; i < chunkCount; i++)
 	{
-		surface()->DrawFilledRect( xpos, ypos, xpos + m_flBarChunkWidth, ypos + m_flBarHeight );
-		xpos += (m_flBarChunkWidth + m_flBarChunkGap);
+		surface()->DrawFilledRect( xpos, ypos, xpos + chunkWide, ypos + barTall );
+		xpos += (chunkWide + chunkGap);
 	}
 #endif // HL2_EPISODIC
 }

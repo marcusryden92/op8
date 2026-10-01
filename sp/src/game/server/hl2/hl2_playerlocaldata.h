@@ -42,6 +42,7 @@ public:
 	CNetworkVar( bool,	m_bAutoAimTarget );
 #ifdef HL2_EPISODIC
 	CNetworkVar( float, m_flFlashBattery );
+	CNetworkVar( bool,	m_bNightVision );	// OF2: night vision replaces the flashlight
 	CNetworkVar( Vector, m_vecLocatorOrigin );
 #endif
 

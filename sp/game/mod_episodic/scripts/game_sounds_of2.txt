@@ -1,0 +1,25 @@
+// OF2: sounds added by Opposing Force 2.
+// Listed in game_sounds_manifest.txt (a copy of Episode Two's with this file added).
+
+// Night vision on/off, played by CHL2_Player::FlashlightTurnOn/Off (hl2_player.cpp).
+// CHAN_STATIC so weapon fire and item pickups don't cut them off; the code stops
+// one before playing the other.
+"OF2Player.NightVisionOn"
+{
+	"channel"	"CHAN_STATIC"
+	"volume"	"0.8"
+	"soundlevel"	"SNDLVL_75dB"
+	"pitch"	"PITCH_NORM"
+
+	"wave"	"items/nightvision_on.wav"
+}
+
+"OF2Player.NightVisionOff"
+{
+	"channel"	"CHAN_STATIC"
+	"volume"	"0.8"
+	"soundlevel"	"SNDLVL_75dB"
+	"pitch"	"PITCH_NORM"
+
+	"wave"	"items/nightvision_off.wav"
+}

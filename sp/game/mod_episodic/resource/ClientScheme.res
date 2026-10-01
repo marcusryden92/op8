@@ -23,31 +23,34 @@ Scheme
 	// controls use these to determine their settings
 	BaseSettings
 	{
-		"FgColor"			"255 220 0 100"
-		"BgColor"			"0 0 0 76"
+		// OP8 jet HUD: phosphor green, amber for cautions, red for critical; HL2 dark panel backgrounds
+		"FgColor"			"10 204 88 255"
+		"BgColor"			"0 0 0 152"	// OF2: HL2 is 76; doubled
 
-		"Panel.FgColor"			"255 220 0 100"
-		"Panel.BgColor"			"0 0 0 76"
-		
-		"BrightFg"		"255 220 0 255"
+		"Panel.FgColor"			"10 204 88 255"
+		"Panel.BgColor"			"0 0 0 152"
+
+		"BrightFg"		"96 240 144 255"
 
 		"DamagedBg"			"180 0 0 200"
-		"DamagedFg"			"180 0 0 230"
-		"BrightDamagedFg"		"255 0 0 255"
+		"DamagedFg"			"230 150 0 255"
+		"BrightDamagedFg"		"245 190 70 255"
+		"CriticalFg"			"225 40 25 255"		// low health (numbers and crosshair bracket)
+		"BrightCriticalFg"		"240 110 90 255"
 
 		// weapon selection colors
-		"SelectionNumberFg"		"255 220 0 255"
-		"SelectionTextFg"		"255 220 0 255"
-		"SelectionEmptyBoxBg" 	"0 0 0 80"
-		"SelectionBoxBg" 		"0 0 0 80"
-		"SelectionSelectedBoxBg" "0 0 0 80"
-		
-		"ZoomReticleColor"	"255 220 0 255"
+		"SelectionNumberFg"		"10 204 88 255"
+		"SelectionTextFg"		"10 204 88 255"
+		"SelectionEmptyBoxBg" 	"0 0 0 160"
+		"SelectionBoxBg" 		"0 0 0 160"
+		"SelectionSelectedBoxBg" "0 0 0 160"
+
+		"ZoomReticleColor"	"10 204 88 255"
 
 		// HL1-style HUD colors
-		"Yellowish"			"255 160 0 255"
-		"Normal"			"255 208 64 255"
-		"Caution"			"255 48 0 255"
+		"Yellowish"			"10 204 88 255"
+		"Normal"			"10 204 88 255"
+		"Caution"			"230 150 0 255"
 
 		// Top-left corner of the "Half-Life 2" on the main screen
 		"Main.Title1.X"				"76"
@@ -350,42 +353,46 @@ Scheme
 				"custom"	"1" [!$OSX]
 			}
 		}
+		// OP8 jet HUD fonts. To swap the typeface, replace every "Share Tech Mono" below
+		// (and the file in CustomFontFiles). No "yres" filters, so sizes scale from 480 lines.
 		HudNumbers
 		{
 			"1"
 			{
-				"name"		"HalfLife2"
-				"tall"		"32"	[$WIN32]
-				"tall"		"38"	[$X360]
-				"weight"	"0"
+				"name"		"Share Tech Mono"
+				"tall"		"30"
+				"weight"	"400"
 				"antialias" "1"
+				"scanlines"	"2"	// OF2: every other pixel row dimmed
 				"additive"	"1"
 				"custom"	"1"
 			}
 		}
-		SquadIcon	[$X360]
+		// Squad icons are glyphs from HALFLIFE2.ttf (used to come from HudNumbers)
+		SquadIcon
 		{
 			"1"
 			{
 				"name"		"HalfLife2"
-				"tall"		"50"
+				"tall"		"32"	[$WIN32]
+				"tall"		"50"	[$X360]
 				"weight"	"0"
 				"antialias" "1"
 				"additive"	"1"
 				"custom"	"1"
 			}
 		}
+		// Phosphor glow: blurred additive copy drawn over the sharp numbers
 		HudNumbersGlow
 		{
 			"1"
 			{
-				"name"		"HalfLife2"
-				"tall"		"32"	[$WIN32]
-				"tall"		"38"	[$X360]
-				"weight"	"0"
+				"name"		"Share Tech Mono"
+				"tall"		"30"
+				"weight"	"400"
 				"blur"		"4"
-				"scanlines" "2"
 				"antialias" "1"
+				"scanlines"	"2"	// OF2: every other pixel row dimmed
 				"additive"	"1"
 				"custom"	"1"
 			}
@@ -394,13 +401,40 @@ Scheme
 		{
 			"1"
 			{
-				"name"		"HalfLife2" [!$OSX]
-				"name"		"Helvetica Bold" [$OSX]
-				"tall"		"16"	[$WIN32]
-				"tall"		"22"	[$X360]
-				"weight"	"1000"
+				"name"		"Share Tech Mono"
+				"tall"		"16"
+				"weight"	"400"
 				"additive"	"1"
 				"antialias" "1"
+				"scanlines"	"2"	// OF2: every other pixel row dimmed
+				"custom"	"1"
+			}
+		}
+		// Labels ("HEALTH", "SUIT", "AMMO", "AUX POWER"...), set per panel via "TextFont" in HudLayout.res
+		HudJetText
+		{
+			"1"
+			{
+				"name"		"Share Tech Mono"
+				"tall"		"11"
+				"weight"	"400"
+				"antialias" "1"
+				"scanlines"	"2"	// OF2: every other pixel row dimmed
+				"additive"	"1"
+				"custom"	"1"
+			}
+		}
+		// Suit boot sequence terminal text (hud_bootsequence.cpp); must stay monospaced
+		HudBootText
+		{
+			"1"
+			{
+				"name"		"Share Tech Mono"
+				"tall"		"10"
+				"weight"	"400"
+				"antialias" "1"
+				"scanlines"	"2"	// OF2: every other pixel row dimmed
+				"additive"	"1"
 				"custom"	"1"
 			}
 		}
@@ -408,11 +442,13 @@ Scheme
 		{
 			"1"
 			{
-				"name"		"Verdana"
+				"name"		"Share Tech Mono"
 				"tall"		"11"
-				"weight"	"700"
+				"weight"	"400"
 				"antialias" "1"
+				"scanlines"	"2"	// OF2: every other pixel row dimmed
 				"additive"	"1"
+				"custom"	"1"
 			}
 		}
 		HudHintTextLarge
@@ -426,75 +462,38 @@ Scheme
 			}
 			"1"	[$WIN32]
 			{
-				"name"		"Verdana" [!$OSX]
-				"name"		"Helvetica Bold" [$OSX]
+				"name"		"Share Tech Mono"
 				"tall"		"14"
-				"weight"	"1000"
+				"weight"	"400"
 				"antialias" "1"
+				"scanlines"	"2"	// OF2: every other pixel row dimmed
 				"additive"	"1"
+				"custom"	"1"
 			}
 		}
 		HudHintTextSmall
 		{
-			"1"	[$WIN32]
+			"1"
 			{
-				"name"		"Verdana" [!$OSX]
-				"name"		"Helvetica" [$OSX]
+				"name"		"Share Tech Mono"
 				"tall"		"11"
-				"weight"	"0"
+				"weight"	"400"
 				"antialias" "1"
+				"scanlines"	"2"	// OF2: every other pixel row dimmed
 				"additive"	"1"
-			}
-			"1"	[$X360]
-			{
-				"name"		"Verdana"
-				"tall"		"12"
-				"weight"	"700"
-				"antialias" "1"
-				"additive"	"1"
+				"custom"	"1"
 			}
 		}
 		HudSelectionText
 		{
 			"1"
 			{
-				"name"		"Verdana"
-				"tall"		"8"
-				"weight"	"700"
-				"antialias" "1"
-				"yres"	"1 599"
-			}
-			"2"
-			{
-				"name"		"Verdana"
+				"name"		"Share Tech Mono"
 				"tall"		"10"
-				"weight"	"700"
+				"weight"	"400"
 				"antialias" "1"
-				"yres"	"600 767"
-			}
-			"3"
-			{
-				"name"		"Verdana"
-				"tall"		"12"
-				"weight"	"900"
-				"antialias" "1"
-				"yres"	"768 1023"
-			}
-			"4"
-			{
-				"name"		"Verdana"
-				"tall"		"16"
-				"weight"	"900"
-				"antialias" "1"
-				"yres"	"1024 1199"
-			}
-			"5"
-			{
-				"name"		"Verdana"
-				"tall"		"17"
-				"weight"	"1000"
-				"antialias" "1"
-				"yres"	"1200 10000"
+				"scanlines"	"2"	// OF2: every other pixel row dimmed
+				"custom"	"1"
 			}
 		}
 		GameUIButtons
@@ -793,7 +792,8 @@ Scheme
 	{
 		"1"		"resource/HALFLIFE2.ttf"
 		"2"		"resource/HL2crosshairs.ttf"
-		"3"	"resource/HL2EP2.ttf"		
+		"3"	"resource/HL2EP2.ttf"
+		"4"		"resource/ShareTechMono-Regular.ttf"	// OP8 jet HUD font (OFL, see ShareTechMono-OFL.txt)
 	}
 
 }

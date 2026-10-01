@@ -1,0 +1,316 @@
+// OF2 suit boot sequence. Plays when the suit comes online, or with the
+// suit_bootsequence console command, which reloads this file every time.
+//
+// Settings:
+//	start_delay		seconds before the first line
+//	max_lines		lines on screen before older ones scroll up and fade out
+//	bar_column		character column the bars start at (keeps them lined up)
+//	bar_width		bar length in "=" characters
+//	type_rate		default typing speed, characters per second
+//	scroll_speed	minimum lines per second when scrolling (it speeds up to keep up)
+//	age_fade		how much the oldest visible line is dimmed (0..1)
+//	end_hold		seconds the finished text stays up
+//	end_fade		seconds to fade it out
+//	burst_rate		default lines per second for bursts
+//	burst_alpha		default brightness of burst lines (0..1)
+//	burst_words		space-separated words for {word} / {WORD}
+//	burst_paths		space-separated paths for {path}
+//	burst_sets		named groups of templates; each "t" value is one template.
+//					A set may also have its own "words" and "paths", which
+//					replace burst_words / burst_paths for that set only.
+//					Placeholders: {word} {WORD} {path} {hex} {hex4} {kb}
+//					{num} (0-9999) and {num:MIN-MAX} (inclusive; a malformed
+//					range is printed literally so typos show up on screen)
+//
+// Each "line" is either a text line:
+//	"text"			the text, or a "#Localization_Token"
+//	"type_rate"		typing speed for this line (0 = appears at once)
+//	"bar"			seconds to fill a progress bar (leave out for no bar)
+//	"stall"			"<bar fraction> <seconds>": the bar freezes there. Repeat up to 4
+//					times per line, in increasing order.
+//	"result"		printed after "; " when the line finishes
+//	"result_color"	"normal", "caution" (amber) or "critical" (red)
+//	"color"			text and bar color: "normal", "caution" or "critical"
+//	"alpha"			brightness (0..1, default 1.0)
+//	"command"		console command run when the line finishes (when the result
+//					prints, for bar lines). Several can be separated by ";".
+//	"pause"			seconds before the next line starts
+// or a burst of random lines from a template set:
+//	"burst"			how many lines
+//	"set"			which burst_sets group (default "default")
+//	"rate"			lines per second for this burst
+//	"color"			color of the burst lines
+//	"alpha"			brightness of the burst lines (default burst_alpha)
+//	"command"		console command run after the last line, before "pause"
+//	"pause"			stop after the burst
+//
+// Blank "text" makes an empty line. Lines still dim with age on top of "alpha".
+// Tip: a text line with "type_rate" "0" and "alpha" "0.55" looks like a burst
+// line but only appears once; used below for one-off asides.
+
+"BootSequence"
+{
+	"start_delay"	"0.6"
+	"max_lines"		"18"
+	"bar_column"	"38"
+	"bar_width"		"20"
+	"type_rate"		"55"
+	"scroll_speed"	"12"
+	"age_fade"		"0.5"
+	"end_hold"		"3.0"
+	"end_fade"		"1.5"
+
+	"burst_rate"	"70"
+	"burst_alpha"	"0.55"
+	"burst_words"	"armor servo cell bus plate dampener gyro hydraulic ceramic weave actuator pneumatic sensor regulator lattice coil capacitor relay thermal flux absorber inertial buffer spinal torso gauntlet visor helmet respirator telemetry uplink squad hazard containment loadshed watchdog"
+	"burst_paths"	"/boot/pcv /lib/modules/5.1.07 /lib/modules/5.1.07/servo /lib/modules/5.1.07/power /lib/modules/5.1.07/sensor /lib/modules/5.1.07/med /lib/modules/5.1.07/nav /lib/modules/5.1.07/comm /opt/blackmesa/fw /etc/pcv.d /hecu/keys /hecu/cmd/net /usr/share/hazard /var/log/telemetry /var/mission"
+
+	"burst_sets"
+	{
+		"default"	// files and modules
+		{
+			"t"	"  loading {path}/{word}_{word}.ko ... ok"
+			"t"	"  mount {path}/{word}{num:0-3} -> /mnt/{word}"
+			"t"	"[{hex}] mapped lib{word}.so ({kb} KB)"
+			"t"	"  exec {path}/{word}d --{word}={num:1-64}"
+			"t"	"  chk {word}_{word}.bin  crc32={hex}  OK"
+			"t"	"  {WORD}_{WORD}: init @ 0x{hex}"
+			"t"	"  unpack {word}.pak [{kb} KB] ........ done"
+			"t"	"  modprobe {word}_{word} ({kb} KB)"
+		}
+		"pbit"		// power-on built-in test
+		{
+			"words"	"servo sensor comm med nav power thermal"
+			"t"	"  PBIT 0x{hex4} watchdog timer ... pass"
+			"t"	"  PBIT 0x{hex4} ECC scrub bank {num:0-15} ... pass"
+			"t"	"  PBIT 0x{hex4} ADC ref drift {num:1-40} uV ... pass"
+			"t"	"  PBIT 0x{hex4} {word} bus loopback ... pass"
+			"t"	"  PBIT 0x{hex4} {word} controller self-test ... pass"
+			"t"	"  PBIT 0x{hex4} flash bank {num:0-3} crc {hex} ... pass"
+		}
+		"memory"
+		{
+			"t"	"  0x{hex}: {hex4} {hex4} {hex4} {hex4} {hex4} {hex4}"
+			"t"	"  test block 0x{hex} .. pattern {hex4} ok"
+			"t"	"  heap {word}: {kb} KB reserved @ 0x{hex}"
+			"t"	"  0x{hex}: {hex4} {hex4} {hex4} {hex4}  ..{word}.."
+		}
+		"power"
+		{
+			"words"	"servo sensor comm med nav thermal"
+			"t"	"  cell {num:1-12}: {num:3600-4200} mV  temp {num:14-31} C"
+			"t"	"  cell {num:1-12}: cycle count {num:900-1400}, fade {num:28-44}%"
+			"t"	"  supercap bank {num:0-3}: precharge {num:92-100}% ... ok"
+			"t"	"  {num:12-48}V rail ripple {num:3-60} mV ... ok"
+			"t"	"  loadshed tier {num:1-4}: {word} ... registered"
+			"t"	"  coulomb counter resync: {num:1200-4800} mAh"
+			"t"	"  TEG harvest (torso): {num:2-40} mW"
+		}
+		"hardware"	// servos and plates
+		{
+			"words"	"shoulder elbow wrist hip knee ankle lumbar thoracic"
+			"t"	"  servo {num:1-24} [{word}] torque cal ... {hex4}"
+			"t"	"  {word} actuator {num:1-4}: travel {num:40-900} um, backlash {num:2-30} um"
+			"t"	"  encoder {num:1-24}: index pulse ... ok"
+			"t"	"  plate {num:1-14}: impedance {num:80-400} ohm"
+			"t"	"  {word} joint limit {num:10-170} deg ... set"
+			"t"	"  servo {num:1-24} [{word}] lubricant viscosity high, derate {num:5-20}%"
+			"t"	"  recoil comp gain {num:40-95}% ... applied"
+		}
+		"medical"
+		{
+			"words"	"morphine epinephrine atropine pralidoxime iodide hemostat dextroamph caffeine"
+			"t"	"  injector slot {num:1-8} [{word}] ... primed"
+			"t"	"  cartridge {num:1-8} [{word}] lot {hex4} ... expired"
+			"t"	"  ECG lead {num:1-6}: impedance {num:200-900} ohm"
+			"t"	"  SpO2 sensor: baseline {num:94-99}%"
+			"t"	"  core temp probe: 36.{num:4-9} C"
+			"t"	"  limb cuff {num:1-4}: pressure test {num:180-260} mmHg ... ok"
+		}
+		"sensor"
+		{
+			"words"	"alpha beta gamma neutron"
+			"t"	"  dosimeter ch {num:1-4} [{word}]: bg {num:8-30} uSv/h"
+			"t"	"  IMS drift tube {num:1-2}: {num:120-180} C ... stable"
+			"t"	"  NV tube: {num:9000-11000} hrs, gain {num:62-88}%"
+			"t"	"  resonance probe: baseline {num:3-9}.{num:0-9} uT"
+			"t"	"  thermal array row {num:0-239}: {num:0-3} dead px"
+			"t"	"  mic array {num:1-4}: noise floor -{num:60-78} dB"
+		}
+		"personality"
+		{
+			"words"	"affirmative negative hooah move clear contact reloading grenade cover sir"
+			"t"	"  phrase {num:1-38}: '{WORD}' ({num:300-1400} ms)"
+			"t"	"  cadence_{num:1-9}.wav ... ok"
+			"t"	"  voice profile {hex4}: pitch {num:80-120}%"
+		}
+		"nav"
+		{
+			"words"	"x y z"
+			"t"	"  IMU gyro bias x={hex4} y={hex4} z={hex4}"
+			"t"	"  IMU voting round {num:1-99}: 3/3 agree"
+			"t"	"  accel {word}: bias {num:1-90} mg"
+			"t"	"  baro: {num:180-420} m below datum"
+			"t"	"  gait model: stride {num:68-82} cm ... loaded"
+		}
+		"gps"		// slow search before the GPS bar
+		{
+			"t"	"  GPS ch {num:1-12}: searching PRN {num:1-32} ... no signal"
+		}
+		"beacon"	// slow, one squadmate at a time
+		{
+			"words"	"alpha bravo charlie delta echo foxtrot"
+			"t"	"  beacon {WORD}-{num:1-12} ... no reply"
+		}
+		"network"
+		{
+			"words"	"alpha bravo charlie delta echo foxtrot"
+			"t"	"  beacon {WORD}-{num:1-12} ... no reply"
+			"t"	"  handshake {word}.hecu.mil:{num:1024-9000} ... timeout"
+			"t"	"  route add {word}-net via 0x{hex4}"
+			"t"	"  retry {num:1-8}/8 squad net ... no carrier"
+			"t"	"  pairing peer {WORD}-{hex4} ... not found"
+		}
+		"scan"
+		{
+			"words"	"quiet quiet quiet noise noise carrier"
+			"t"	"  sweep {num:30-512}.{num:100-999} MHz ... {word}"
+			"t"	"  band {num:1-9}: noise floor -{num:90-110} dBm"
+			"t"	"  sweep {num:30-512}.{num:100-999} MHz ... {word}"
+		}
+		"codebook"
+		{
+			"t"	"  try codebook {hex4}-{hex4} ... no match"
+			"t"	"  key schedule {num:1-64}: entropy check ... fail"
+			"t"	"  frame sync 0x{hex} ... lost"
+			"t"	"  brute depth {num:1-48}/48 ... no match"
+		}
+		"intercept"
+		{
+			"words"	"helix vice union jury razor victor"
+			"t"	"  [ch{num:1-3}] ...unit {WORD}-{num:1-9} ... sweep sector {num:1-17}..."
+			"t"	"  [ch{num:1-3}] ## ##### contain ## grid {hex4} ####"
+			"t"	"  [ch{num:1-3}] ...{word} team ... converge ... ####..."
+			"t"	"  [ch{num:1-3}] ####### {num:2-9} units ... reinforce ..."
+			"t"	"  [ch{num:1-3}] ...curfew ... block {num:1-40} ... ##..."
+			"t"	"  [ch{num:1-3}] ...status ## code {num:10-99} ## ..."
+		}
+	}
+
+	"lines"
+	{
+		// --- header ---
+		"line"	{ "text"	"BLACK MESA ARMORED SYSTEMS DIVISION"	"type_rate"	"0"	"pause"	"0.15" }
+		"line"	{ "text"	"a division of the Black Mesa Research Facility"	"type_rate"	"0"	"pause"	"0.15" }
+		"line"	{ "text"	"PCV Mk.II Powered Combat Vest // firmware 5.1.07 'STUBBORN MULE'"	"type_rate"	"0"	"pause"	"0.15" }
+		"line"	{ "text"	"firmware by Dr. Rosenberg & the Sector E Hardware Group"	"type_rate"	"0"	"pause"	"0.15" }
+		"line"	{ "text"	"licensed to U.S.M.C. H.E.C.U. under contract BM-HECU-0451"	"type_rate"	"0"	"pause"	"0.15" }
+		"line"	{ "text"	"unauthorized field modification voids warranty"	"type_rate"	"0"	"pause"	"0.9" }
+		"line"	{ "text"	""	"pause"	"0.1" }
+
+		// --- core ---
+		"line"	{ "text"	"> init boot sequence"	"type_rate"	"30"	"pause"	"0.3" }
+		"line"	{ "burst"	"20"	"set"	"pbit"	"rate"	"40"	"pause"	"0.2" }	// orderly, readable
+		"line"	{ "burst"	"80"	"set"	"memory"	"rate"	"140"	"pause"	"0.1" }	// memory dump floods past
+		"line"	{ "text"	"Memory integrity check"	"bar"	"0.8"	"stall"	"0.7 0.5"	"result"	"complete" }
+		"line"	{ "text"	"Real-time clock"	"bar"	"0.4"	"stall"	"0.5 0.6"	"result"	"last valid 200-, current unknown"	"result_color"	"caution"	"pause"	"0.4" }
+
+		// --- power ---
+		"line"	{ "text"	"> mount /dev/vest0"	"type_rate"	"30"	"pause"	"0.2" }
+		"line"	{ "burst"	"12"	"pause"	"0.1" }
+		"line"	{ "text"	"  waiting for /dev/vest0 ..."	"type_rate"	"0"	"alpha"	"0.55"	"pause"	"1.1" }	// hang
+		"line"	{ "text"	"  /dev/vest0 ready"	"type_rate"	"0"	"alpha"	"0.55"	"pause"	"0.1" }
+		"line"	{ "burst"	"30"	"rate"	"90"	"pause"	"0.1" }
+		"line"	{ "text"	"  chk warranty.cfg ... expired"	"type_rate"	"0"	"alpha"	"0.55"	"pause"	"0.05" }
+		"line"	{ "burst"	"6"	"set"	"power"	"rate"	"8"	"pause"	"0.1" }	// reading cells one by one
+		"line"	{ "burst"	"16"	"set"	"power"	"rate"	"60"	"pause"	"0.5" }
+		"line"	{ "text"	"Power cell integrity check"	"bar"	"1.0"	"stall"	"0.55 0.6"	"result"	"complete" }
+		"line"	{ "text"	"Battery health check"	"bar"	"1.4"	"stall"	"0.3 0.4"	"stall"	"0.85 1.0"	"result"	"61% of rated capacity"	"result_color"	"caution" }
+		"line"	{ "text"	"Thermoelectric harvesting"	"bar"	"0.6"	"result"	"online" }
+		"line"	{ "text"	"HEV charger protocol"	"bar"	"0.7"	"stall"	"0.6 0.4"	"result"	"compatible" }
+
+		// --- servos and armor ---
+		"line"	{ "text"	"> exec servo_calib --all"	"type_rate"	"30"	"pause"	"0.2" }
+		"line"	{ "burst"	"45"	"set"	"hardware"	"rate"	"110"	"pause"	"0.4" }
+		"line"	{ "text"	"  servo 17 [knee] no ack, retrying"	"type_rate"	"0"	"alpha"	"0.55"	"pause"	"0.7" }	// hiccup
+		"line"	{ "text"	"  servo 17 [knee] ack"	"type_rate"	"0"	"alpha"	"0.55"	"pause"	"0.1" }
+		"line"	{ "burst"	"50"	"set"	"hardware"	"rate"	"110"	"pause"	"0.2" }
+		"line"	{ "text"	"  pipe wrench affinity table ... loaded"	"type_rate"	"0"	"alpha"	"0.55"	"pause"	"0.3" }
+		"line"	{ "text"	"Servo actuator calibration"	"bar"	"0.9"	"result"	"complete" }
+		"line"	{ "text"	"Armor plate impedance scan"	"bar"	"0.8"	"stall"	"0.4 0.5"	"result"	"2 plates degraded"	"result_color"	"caution" }
+		"line"	{ "text"	"Salute-assist servo"	"bar"	"0.4"	"result"	"complete" }
+
+		// --- medical ---
+		"line"	{ "text"	"> modprobe medsys"	"type_rate"	"30"	"pause"	"0.2" }
+		"line"	{ "burst"	"10"	"set"	"medical"	"rate"	"30"	"pause"	"0.2" }	// short and careful
+		"line"	{ "text"	"  water reclamation ... online (do not ask)"	"type_rate"	"0"	"alpha"	"0.55"	"pause"	"0.3" }
+		"line"	{ "text"	"Automatic medical systems"	"bar"	"0.7"	"stall"	"0.4 0.5"	"result"	"armed" }
+		"line"	{ "text"	"Injector cartridges"	"bar"	"0.6"	"result"	"expired, dispensing anyway"	"result_color"	"caution" }
+		"line"	{ "text"	"Vital signs monitor"	"bar"	"0.8"	"result"	"online" }
+		"line"	{ "text"	"Limb tourniquet cuffs"	"bar"	"0.5"	"result"	"online" }
+
+		// --- sensors ---
+		"line"	{ "text"	"> start sensord"	"type_rate"	"30"	"pause"	"0.2" }
+		"line"	{ "burst"	"15"	"set"	"sensor"	"pause"	"0.3" }
+		"line"	{ "burst"	"4"	"set"	"sensor"	"rate"	"5"	"pause"	"0.2" }	// sensors warming up
+		"line"	{ "burst"	"25"	"set"	"sensor"	"rate"	"90"	"pause"	"0.2" }
+		"line"	{ "text"	"  headcrab proximity alarm ... disabled (budget cuts)"	"type_rate"	"0"	"alpha"	"0.55"	"pause"	"0.05" }
+		"line"	{ "text"	"  specimen library: 412 entries, last update 200-"	"type_rate"	"0"	"alpha"	"0.55"	"pause"	"0.4" }
+		"line"	{ "text"	"Radiation dosimeter"	"bar"	"0.6"	"result"	"calibrated" }
+		"line"	{ "text"	"Chemical agent detector"	"bar"	"0.8"	"result"	"complete" }
+		"line"	{ "text"	"Night vision check"	"bar"	"1.0"	"stall"	"0.65 0.7"	"result"	"complete" }
+		"line"	{ "text"	"Respirator filter canister"	"bar"	"0.5"	"result"	"seal expired"	"result_color"	"caution" }
+
+		// --- navigation: the world starts to feel wrong ---
+		"line"	{ "text"	"> start navd"	"type_rate"	"30"	"pause"	"0.2" }
+		"line"	{ "burst"	"25"	"set"	"nav"	"rate"	"80"	"pause"	"0.2" }
+		"line"	{ "text"	"  GPS almanac age 7,301 days ... stale"	"type_rate"	"0"	"alpha"	"0.55"	"pause"	"0.3" }
+		"line"	{ "burst"	"6"	"set"	"gps"	"rate"	"5"	"pause"	"0.3" }	// slow, fruitless search
+		"line"	{ "text"	"Inertial navigation"	"bar"	"0.8"	"result"	"aligned" }
+		"line"	{ "text"	"GPS receiver"	"bar"	"1.0"	"stall"	"0.9 0.8"	"result"	"0 satellites in view"	"result_color"	"caution" }
+		"line"	{ "text"	"Magnetic compass"	"bar"	"0.6"	"stall"	"0.5 0.5"	"result"	"unstable, field source 042"	"result_color"	"caution"	"pause"	"0.4" }
+
+		// --- comms: nobody answers ---
+		"line"	{ "text"	"> netctl up hecu0"	"type_rate"	"30"	"pause"	"0.2" }
+		"line"	{ "burst"	"20"	"set"	"network"	"rate"	"80"	"pause"	"0.3" }
+		"line"	{ "burst"	"6"	"set"	"beacon"	"rate"	"3"	"pause"	"0.4" }	// calling squadmates, one at a time
+		"line"	{ "text"	"Squad radio link"	"bar"	"1.2"	"stall"	"0.6 1.5"	"result"	"no response (0/12)"	"result_color"	"critical"	"pause"	"0.4" }
+		"line"	{ "text"	"> netctl retry hecu0"	"type_rate"	"30"	"pause"	"0.8" }
+		"line"	{ "text"	"Squad radio link"	"bar"	"0.8"	"stall"	"0.9 1.2"	"result"	"no response"	"result_color"	"critical"	"pause"	"0.4" }
+		"line"	{ "text"	"Command uplink"	"bar"	"0.7"	"stall"	"0.5 0.8"	"result"	"no route to host"	"result_color"	"critical" }
+		"line"	{ "text"	"Crypto key fill"	"bar"	"0.5"	"result"	"expired, operating in clear"	"result_color"	"caution" }
+		"line"	{ "text"	"Friend-or-foe transponder"	"bar"	"0.6"	"result"	"0 friendlies in range"	"result_color"	"caution"	"pause"	"0.8" }
+
+		// --- someone else is talking ---
+		"line"	{ "text"	"> scan --band all"	"type_rate"	"30"	"pause"	"0.2" }
+		"line"	{ "burst"	"35"	"set"	"scan"	"rate"	"120"	"pause"	"0.1" }
+		"line"	{ "text"	"  sweep 412.775 MHz ... carrier"	"type_rate"	"0"	"alpha"	"0.85"	"pause"	"0.7" }	// it stops here
+		"line"	{ "burst"	"10"	"set"	"scan"	"rate"	"60"	"pause"	"0.3" }
+		"line"	{ "text"	"Unidentified traffic"	"bar"	"0.6"	"result"	"3 channels, encrypted"	"result_color"	"caution"	"pause"	"0.4" }
+		"line"	{ "text"	"> sigint decrypt --auto"	"type_rate"	"30"	"pause"	"0.2" }
+		"line"	{ "burst"	"6"	"set"	"codebook"	"rate"	"20"	"pause"	"0.2" }
+		"line"	{ "text"	"Attempt 1"	"bar"	"0.8"	"stall"	"0.35 0.6"	"result"	"failed"	"result_color"	"critical"	"pause"	"0.3" }
+		"line"	{ "burst"	"14"	"set"	"codebook"	"rate"	"50"	"pause"	"0.2" }
+		"line"	{ "text"	"Attempt 2"	"bar"	"1.0"	"stall"	"0.5 0.5"	"stall"	"0.8 0.9"	"result"	"failed"	"result_color"	"critical"	"pause"	"0.4" }
+		"line"	{ "text"	"  codebook match: legacy civil band"	"type_rate"	"0"	"pause"	"0.3" }
+		"line"	{ "text"	"Attempt 3"	"bar"	"1.2"	"stall"	"0.3 0.4"	"stall"	"0.95 1.5"	"result"	"success"	"pause"	"0.2" }
+		"line"	{ "text"	"  cipher strength: 40-bit (legacy, unpatched)"	"type_rate"	"0"	"alpha"	"0.55"	"pause"	"0.2" }
+		"line"	{ "burst"	"12"	"set"	"intercept"	"rate"	"8"	"alpha"	"1.0"	"color"	"caution"	"pause"	"0.4" }
+		"line"	{ "text"	"  [ch1] ...priority ## unknown signature ## sector ##..."	"type_rate"	"45"	"color"	"critical"	"pause"	"0.6" }
+		"line"	{ "text"	"Channel 3 -> HUD"	"bar"	"0.4"	"result"	"routed"	"result_color"	"caution"	"command"	"hud_overwatch 1; play buttons/blip1.wav"	"pause"	"0.9" }
+
+		// --- personality: the suit carries on as if nothing happened ---
+		"line"	{ "text"	"> load personality.cfg"	"type_rate"	"30"	"pause"	"0.2" }
+		"line"	{ "burst"	"6"	"set"	"personality"	"rate"	"30"	"pause"	"0.2" }
+		"line"	{ "text"	"  chk morale.bin ... not found"	"type_rate"	"0"	"alpha"	"0.55"	"pause"	"0.3" }
+		"line"	{ "text"	"Drill instructor voice pack"	"bar"	"0.6"	"result"	"loaded (38 phrases)" }
+		"line"	{ "text"	"Morale playlist"	"bar"	"0.4"	"result"	"3 tracks (all Sousa)" }
+		"line"	{ "text"	"Caffeine dispenser"	"bar"	"0.5"	"stall"	"0.9 0.8"	"result"	"installed (200 mg/dose)" }
+		"line"	{ "text"	"Long jump module"	"bar"	"0.5"	"stall"	"0.2 0.9"	"result"	"not installed"	"result_color"	"caution"	"pause"	"0.5" }
+
+		// --- end ---
+		"line"	{ "text"	""	"pause"	"0.1" }
+		"line"	{ "text"	"13 warnings. Operational."	"type_rate"	"30"	"pause"	"0.5" }
+		"line"	{ "text"	">> PCV ONLINE // GOOD LUCK, CORPORAL."	"type_rate"	"0"	"pause"	"0.2" }
+	}
+}

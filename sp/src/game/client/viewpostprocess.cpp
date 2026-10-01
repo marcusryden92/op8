@@ -26,6 +26,10 @@
 
 #include "proxyentity.h"
 
+#ifdef HL2_EPISODIC
+#include "of2_nightvision.h"	// OF2
+#endif
+
 //-----------------------------------------------------------------------------
 // Globals
 //-----------------------------------------------------------------------------
@@ -2521,7 +2525,12 @@ void DoEnginePostProcessing( int x, int y, int w, int h, bool bFlashlightIsOn, b
 										  ( g_pMaterialSystemHardwareConfig->GetDXSupportLevel() >= 90) &&
 										  ( g_pMaterialSystemHardwareConfig->GetHDRType() != HDR_TYPE_FLOAT ) &&
 										  g_pColorCorrectionMgr->HasNonZeroColorCorrectionWeights() &&
+#ifdef HL2_EPISODIC
+										  // OF2: night vision is a color correction lookup, so it can't depend on the video setting
+										  ( mat_colorcorrection.GetInt() || OF2_NightVisionAmount() > 0.0f );
+#else
 										  mat_colorcorrection.GetInt();
+#endif
 			bool  bSplitScreenHDR		= mat_show_ab_hdr.GetInt();
 			pRenderContext->EnableColorCorrection( bPerformColCorrect );
 			if ( bPerformBloom || bPerformSoftwareAA || bPerformColCorrect )

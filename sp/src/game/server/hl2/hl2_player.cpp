@@ -707,6 +707,11 @@ void CHL2_Player::Precache( void )
 	PrecacheScriptSound( "HL2Player.UseDeny" );
 	PrecacheScriptSound( "HL2Player.FlashLightOn" );
 	PrecacheScriptSound( "HL2Player.FlashLightOff" );
+#ifdef HL2_EPISODIC
+	// OF2: scripts/game_sounds_of2.txt
+	PrecacheScriptSound( "OF2Player.NightVisionOn" );
+	PrecacheScriptSound( "OF2Player.NightVisionOff" );
+#endif
 	PrecacheScriptSound( "HL2Player.PickupWeapon" );
 	PrecacheScriptSound( "HL2Player.TrainUse" );
 	PrecacheScriptSound( "HL2Player.Use" );
@@ -2623,7 +2628,13 @@ bool CHL2_Player::ApplyBattery( float powerMultiplier )
 //-----------------------------------------------------------------------------
 int CHL2_Player::FlashlightIsOn( void )
 {
+#ifdef HL2_EPISODIC
+	// OF2: the suit has night vision instead of a flashlight. Everything that used to
+	// drive the flashlight (impulse 100, the battery, map inputs) now drives this flag.
+	return m_HL2Local.m_bNightVision;
+#else
 	return IsEffectActive( EF_DIMLIGHT );
+#endif
 }
 
 
@@ -2644,8 +2655,15 @@ void CHL2_Player::FlashlightTurnOn( void )
 		return;
 #endif
 
+#ifdef HL2_EPISODIC
+	// OF2: the sounds are long, so cut the other one off when toggling quickly
+	m_HL2Local.m_bNightVision = true;
+	StopSound( "OF2Player.NightVisionOff" );
+	EmitSound( "OF2Player.NightVisionOn" );
+#else
 	AddEffects( EF_DIMLIGHT );
 	EmitSound( "HL2Player.FlashLightOn" );
+#endif
 
 	variant_t flashlighton;
 	flashlighton.SetFloat( m_HL2Local.m_flSuitPower / 100.0f );
@@ -2663,8 +2681,14 @@ void CHL2_Player::FlashlightTurnOff( void )
 			return;
 	}
 
+#ifdef HL2_EPISODIC
+	m_HL2Local.m_bNightVision = false;	// OF2
+	StopSound( "OF2Player.NightVisionOn" );
+	EmitSound( "OF2Player.NightVisionOff" );
+#else
 	RemoveEffects( EF_DIMLIGHT );
 	EmitSound( "HL2Player.FlashLightOff" );
+#endif
 
 	variant_t flashlightoff;
 	flashlightoff.SetFloat( m_HL2Local.m_flSuitPower / 100.0f );
@@ -2676,6 +2700,10 @@ void CHL2_Player::FlashlightTurnOff( void )
 #define FLASHLIGHT_RANGE	Square(600)
 bool CHL2_Player::IsIlluminatedByFlashlight( CBaseEntity *pEntity, float *flReturnDot )
 {
+#ifdef HL2_EPISODIC
+	// OF2: night vision is passive, so there is no beam for NPCs to notice
+	return false;
+#else
 	if( !FlashlightIsOn() )
 		return false;
 
@@ -2727,6 +2755,7 @@ bool CHL2_Player::IsIlluminatedByFlashlight( CBaseEntity *pEntity, float *flRetu
 		return false;
 
 	return true;
+#endif // HL2_EPISODIC
 }
 
 //-----------------------------------------------------------------------------
@@ -4051,6 +4080,11 @@ void CHL2_Player::OnRestore()
 {
 	BaseClass::OnRestore();
 	m_pPlayerAISquad = g_AI_SquadManager.FindCreateSquad(AllocPooledString(PLAYER_SQUADNAME));
+
+#ifdef HL2_EPISODIC
+	// OF2: saves from before night vision replaced the flashlight can still have the beam switched on
+	RemoveEffects( EF_DIMLIGHT );
+#endif
 
 #ifdef SP_ANIM_STATE
 	if ( m_pPlayerAnimState == NULL )

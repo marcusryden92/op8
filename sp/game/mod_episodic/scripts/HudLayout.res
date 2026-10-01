@@ -3,6 +3,8 @@
 	HudHealth [$WIN32]
 	{
 		"fieldName"		"HudHealth"
+		"BgFeather"	"0"	// OF2: backdrop edges fade in over this distance (0 = crisp)
+		"BgCornerRadius"	"1.3"	// OF2: backdrop corner radius, about 3 px at 1080p (-1 = HL2's rounder corners)
 		"xpos"	"16"
 		"ypos"	"432"
 		"wide"	"102"
@@ -11,15 +13,24 @@
 		"enabled" "1"
 
 		"PaintBackgroundType"	"2"
+		"TextFont"	"HudJetText"
+		"Blur"	"0.6"	// resting phosphor glow; hudanimations.txt returns here instead of 0
 		
 		"text_xpos" "8"
 		"text_ypos" "20"
-		"digit_xpos" "50"
-		"digit_ypos" "2"
+		"digit_xpos" "36"	// was 50; the icon is narrower than the old text label
+		"icon_xpos" "8"	// OF2 vector icon (plus / shield) in place of the label
+		"icon_ypos" "10"	// only used when icon_tall is set
+		"icon_tall" "0"	// 0 = match the digits: on their baseline, digit height (icon_digit_ratio of the font)
+		"icon_stroke" "1.5"
+		"icon_glow" "0.45"	// icon halo strength (default 0.6)
+		"digit_ypos" "5"	// baseline aligned with the label (Share Tech Mono metrics)
 	}
 	HudHealth [$X360]
 	{
 		"fieldName"		"HudHealth"
+		"BgFeather"	"0"	// OF2: backdrop edges fade in over this distance (0 = crisp)
+		"BgCornerRadius"	"1.3"	// OF2: backdrop corner radius, about 3 px at 1080p (-1 = HL2's rounder corners)
 		"xpos"	"48"
 		"ypos"	"416"
 		"wide"	"115"
@@ -38,6 +49,8 @@
 	HudSuit [$WIN32]
 	{
 		"fieldName"		"HudSuit"
+		"BgFeather"	"0"	// OF2: backdrop edges fade in over this distance (0 = crisp)
+		"BgCornerRadius"	"1.3"	// OF2: backdrop corner radius, about 3 px at 1080p (-1 = HL2's rounder corners)
 		"xpos"	"140"
 		"ypos"	"432"
 		"wide"	"108"
@@ -46,15 +59,24 @@
 		"enabled" "1"
 
 		"PaintBackgroundType"	"2"
+		"TextFont"	"HudJetText"
+		"Blur"	"0.6"	// resting phosphor glow; hudanimations.txt returns here instead of 0
 
 		"text_xpos" "8"
 		"text_ypos" "20"
-		"digit_xpos" "50"
-		"digit_ypos" "2"
+		"digit_xpos" "36"	// was 50; the icon is narrower than the old text label
+		"icon_xpos" "8"	// OF2 vector icon (plus / shield) in place of the label
+		"icon_ypos" "10"	// only used when icon_tall is set
+		"icon_tall" "0"	// 0 = match the digits: on their baseline, digit height (icon_digit_ratio of the font)
+		"icon_stroke" "1.5"
+		"icon_glow" "0.45"	// icon halo strength (default 0.6)
+		"digit_ypos" "5"	// baseline aligned with the label (Share Tech Mono metrics)
 	}
 	HudSuit [$X360]
 	{
 		"fieldName"		"HudSuit"
+		"BgFeather"	"0"	// OF2: backdrop edges fade in over this distance (0 = crisp)
+		"BgCornerRadius"	"1.3"	// OF2: backdrop corner radius, about 3 px at 1080p (-1 = HL2's rounder corners)
 		"xpos"	"176"
 		"ypos"	"416"
 		"wide"	"117"
@@ -73,6 +95,8 @@
 	HudAmmo	[$WIN32]
 	{
 		"fieldName" "HudAmmo"
+		"BgFeather"	"0"	// OF2: backdrop edges fade in over this distance (0 = crisp)
+		"BgCornerRadius"	"1.3"	// OF2: backdrop corner radius, about 3 px at 1080p (-1 = HL2's rounder corners)
 		"xpos"	"r150"
 		"ypos"	"432"
 		"wide"	"136"
@@ -81,17 +105,21 @@
 		"enabled" "1"
 
 		"PaintBackgroundType"	"2"
+		"TextFont"	"HudJetText"
+		"Blur"	"0.6"	// resting phosphor glow; hudanimations.txt returns here instead of 0
 
 		"text_xpos" "8"
 		"text_ypos" "20"
 		"digit_xpos" "44"
-		"digit_ypos" "2"
+		"digit_ypos" "5"	// baselines aligned with the label (Share Tech Mono metrics)
 		"digit2_xpos" "98"
 		"digit2_ypos" "16"
 	}
 	HudAmmo	[$X360]
 	{
 		"fieldName" "HudAmmo"
+		"BgFeather"	"0"	// OF2: backdrop edges fade in over this distance (0 = crisp)
+		"BgCornerRadius"	"1.3"	// OF2: backdrop corner radius, about 3 px at 1080p (-1 = HL2's rounder corners)
 		"xpos"	"r208"
 		"ypos"	"416"
 		"wide"	"160"
@@ -112,6 +140,8 @@
 	HudAmmoSecondary	[$WIN32]
 	{
 		"fieldName" "HudAmmoSecondary"
+		"BgFeather"	"0"	// OF2: backdrop edges fade in over this distance (0 = crisp)
+		"BgCornerRadius"	"1.3"	// OF2: backdrop corner radius, about 3 px at 1080p (-1 = HL2's rounder corners)
 		"xpos"	"r76"
 		"ypos"	"432"
 		"wide"	"60"
@@ -120,15 +150,19 @@
 		"enabled" "1"
 
 		"PaintBackgroundType"	"2"
+		"TextFont"	"HudJetText"
+		"Blur"	"0.6"	// resting phosphor glow; hudanimations.txt returns here instead of 0
 
 		"text_xpos" "8"
 		"text_ypos" "22"
 		"digit_xpos" "36"
-		"digit_ypos" "2"
+		"digit_ypos" "7"	// baseline aligned with the label (Share Tech Mono metrics)
 	}
 	HudAmmoSecondary	[$X360]
 	{
 		"fieldName" "HudAmmoSecondary"
+		"BgFeather"	"0"	// OF2: backdrop edges fade in over this distance (0 = crisp)
+		"BgCornerRadius"	"1.3"	// OF2: backdrop corner radius, about 3 px at 1080p (-1 = HL2's rounder corners)
 		"xpos"	"r113"
 		"ypos"	"416"
 		"wide"	"65"
@@ -147,6 +181,8 @@
 	HudPosture	[$WIN32]
 	{
 		"fieldName" 		"HudPosture"
+		"BgFeather"	"0"	// OF2: backdrop edges fade in over this distance (0 = crisp)
+		"BgCornerRadius"	"1.3"	// OF2: backdrop corner radius, about 3 px at 1080p (-1 = HL2's rounder corners)
 		"visible" 		"1"
 		"PaintBackgroundType"	"2"
 		"xpos"	"16"
@@ -160,6 +196,8 @@
 	HudPosture	[$X360]
 	{
 		"fieldName" 		"HudPosture"
+		"BgFeather"	"0"	// OF2: backdrop edges fade in over this distance (0 = crisp)
+		"BgCornerRadius"	"1.3"	// OF2: backdrop corner radius, about 3 px at 1080p (-1 = HL2's rounder corners)
 		"visible" 		"1"
 		"PaintBackgroundType"	"2"
 		"xpos"	"48"
@@ -174,6 +212,8 @@
 	HudSuitPower	[$WIN32]
 	{
 		"fieldName" "HudSuitPower"
+		"BgFeather"	"0"	// OF2: backdrop edges fade in over this distance (0 = crisp)
+		"BgCornerRadius"	"1.3"	// OF2: backdrop corner radius, about 3 px at 1080p (-1 = HL2's rounder corners)
 		"visible" "1"
 		"enabled" "1"
 		"xpos"	"16"
@@ -181,9 +221,10 @@
 		"wide"	"102"
 		"tall"	"26"
 		
-		"AuxPowerLowColor" "255 0 0 220"
-		"AuxPowerHighColor" "255 220 0 220"
+		"AuxPowerLowColor" "230 150 0 220"
+		"AuxPowerHighColor" "10 204 88 220"
 		"AuxPowerDisabledAlpha" "70"
+		"TextFont"	"HudJetText"
 
 		"BarInsetX" "8"
 		"BarInsetY" "15"
@@ -203,6 +244,8 @@
 	HudSuitPower	[$X360]
 	{
 		"fieldName" "HudSuitPower"
+		"BgFeather"	"0"	// OF2: backdrop edges fade in over this distance (0 = crisp)
+		"BgCornerRadius"	"1.3"	// OF2: backdrop corner radius, about 3 px at 1080p (-1 = HL2's rounder corners)
 		"visible" "1"
 		"enabled" "1"
 		"xpos"	"48"
@@ -233,31 +276,36 @@
 	HudFlashlight
 	{
 		"fieldName" "HudFlashlight"
+		"BgFeather"	"0"	// OF2: backdrop edges fade in over this distance (0 = crisp)
+		"BgCornerRadius"	"1.3"	// OF2: backdrop corner radius, about 3 px at 1080p (-1 = HL2's rounder corners)
 		"visible" "1"
 		"PaintBackgroundType"	"2"
 		"xpos"	"270"		[$WIN32]
-		"ypos"	"444"		[$WIN32]
+		"ypos"	"442"		[$WIN32]
 		"xpos_hidef"	"306"		[$X360]		// aligned to left
 		"xpos_lodef"	"c-18"		[$X360]		// centered in screen
-		"ypos"	"428"		[$X360]				
-		"tall"  "24"
-		"wide"	"36"
-		"font"	"WeaponIconsSmall"
-		
-		"icon_xpos"	"4"
-		"icon_ypos" "-8"
-		
-		"BarInsetX" "4"
-		"BarInsetY" "18"
-		"BarWidth" "28"
-		"BarHeight" "2"
-		"BarChunkWidth" "2"
-		"BarChunkGap" "1"
+		"ypos"	"428"		[$X360]
+		"tall"  "26"
+		"wide"	"44"
+
+		// OF2: night vision indicator (was the flashlight icon). The label and the bar are
+		// both centered in the panel; vertical metrics match HudSuitPower.
+		"TextFont"	"HudJetText"
+		"text_ypos"	"4"
+		"DisabledAlpha"	"70"	// label while off, and the used-up part of the bar
+
+		"BarInsetY" "15"
+		"BarHeight" "4"
+		"BarChunks" "5"
+		"BarChunkWidth" "4"
+		"BarChunkGap" "2"
 	}
 
 	HudLocator
 	{
 		"fieldName" "HudLocator"
+		"BgFeather"	"0"	// OF2: backdrop edges fade in over this distance (0 = crisp)
+		"BgCornerRadius"	"1.3"	// OF2: backdrop corner radius, about 3 px at 1080p (-1 = HL2's rounder corners)
 		"visible" "1"
 		"PaintBackgroundType"	"2"
 		"xpos"	"c8"	[$WIN32]
@@ -300,6 +348,8 @@
 	HudWeaponSelection
 	{
 		"fieldName" "HudWeaponSelection"
+		"BgFeather"	"0"
+		"BgCornerRadius"	"1.3"	// OF2: backdrop corner radius, about 3 px at 1080p
 		"ypos" 	"16"	[$WIN32]
 		"ypos" 	"32"	[$X360]
 		"visible" "1"
@@ -318,6 +368,21 @@
 		"SelectionNumberYPos" "4"
 		"SelectionGrowTime"	"0.4"
 		"TextYPos" "64"
+	}
+
+	HudBootSequence		// OF2 suit boot text (hud_bootsequence.cpp, scripts/hud_bootsequence.txt)
+	{
+		"fieldName"	"HudBootSequence"
+		"BgFeather"	"0"	// OF2: backdrop edges fade in over this distance (0 = crisp)
+		"BgCornerRadius"	"1.3"	// OF2: backdrop corner radius, about 3 px at 1080p (-1 = HL2's rounder corners)
+		"visible"	"1"
+		"enabled"	"1"
+		"xpos"	"16"
+		"ypos"	"12"
+		"wide"	"490"	// fits about 96 characters (the longest boot lines are 92)
+		"tall"	"204"	// the dark box: 2 * TextPadding + max_lines * font height (2 * 12 + 18 * 10)
+		"TextFont"	"HudBootText"
+		"TextPadding"	"12"	// box edge to text; keep it above BgFeather so text never sits in the soft edge
 	}
 
 	HudCrosshair
@@ -505,6 +570,8 @@
 	HudHintDisplay
 	{
 		"fieldName"	"HudHintDisplay"
+		"BgFeather"	"0"	// OF2: backdrop edges fade in over this distance (0 = crisp)
+		"BgCornerRadius"	"1.3"	// OF2: backdrop corner radius, about 3 px at 1080p (-1 = HL2's rounder corners)
 		"visible"	"0"
 		"enabled" "1"
 		"Alpha"		"0"		// Remove this to enable hint hud element
@@ -518,7 +585,7 @@
 		"text_ypos"	"8"
 		"text_xgap"	"8"
 		"text_ygap"	"8"
-		"TextColor"	"255 170 0 220"
+		"TextColor"	"10 204 88 220"
 
 		"PaintBackgroundType"	"2"
 	}
@@ -526,6 +593,8 @@
 	HudHintKeyDisplay
 	{
 		"fieldName"	"HudHintKeyDisplay"
+		"BgFeather"	"0"	// OF2: backdrop edges fade in over this distance (0 = crisp)
+		"BgCornerRadius"	"1.3"	// OF2: backdrop corner radius, about 3 px at 1080p (-1 = HL2's rounder corners)
 		"visible"	"0"
 		"enabled" 	"1"
 		"xpos"		"r120"	[$WIN32]
@@ -538,7 +607,7 @@
 		"text_ypos"	"8"
 		"text_xgap"	"8"
 		"text_ygap"	"8"
-		"TextColor"	"255 170 0 220"
+		"TextColor"	"10 204 88 220"
 
 		"PaintBackgroundType"	"2"
 	}
@@ -547,6 +616,8 @@
 	HudSquadStatus	[$WIN32]
 	{
 		"fieldName"	"HudSquadStatus"
+		"BgFeather"	"0"	// OF2: backdrop edges fade in over this distance (0 = crisp)
+		"BgCornerRadius"	"1.3"	// OF2: backdrop corner radius, about 3 px at 1080p (-1 = HL2's rounder corners)
 		"visible"	"1"
 		"enabled" "1"
 		"xpos"	"r120"
@@ -555,7 +626,11 @@
 		"tall"	"46"
 		"text_xpos"	"8"
 		"text_ypos"	"34"
-		"SquadIconColor"	"255 220 0 160"
+		"SquadIconColor"	"10 204 88 160"
+		"SquadTextColor"	"10 204 88 160"
+		"LastMemberColor"	"10 204 88 0"
+		"TextFont"	"HudJetText"
+		"IconFont"	"SquadIcon"	// HudNumbers is no longer the HL2 glyph font
 		"IconInsetX"	"8"
 		"IconInsetY"	"0"
 		"IconGap"		"24"
@@ -565,6 +640,8 @@
 	HudSquadStatus	[$X360]
 	{
 		"fieldName"	"HudSquadStatus"
+		"BgFeather"	"0"	// OF2: backdrop edges fade in over this distance (0 = crisp)
+		"BgCornerRadius"	"1.3"	// OF2: backdrop corner radius, about 3 px at 1080p (-1 = HL2's rounder corners)
 		"visible"	"1"
 		"enabled" "1"
 		"xpos"	"r182"
@@ -573,11 +650,14 @@
 		"tall"	"62"
 		"text_xpos"	"8"
 		"text_ypos"	"44"
-		"SquadIconColor"	"255 220 0 160"
+		"SquadIconColor"	"10 204 88 160"
+		"SquadTextColor"	"10 204 88 160"
+		"LastMemberColor"	"10 204 88 0"
+		"TextFont"	"HudJetText"
+		"IconFont"	"SquadIcon"	// HudNumbers is no longer the HL2 glyph font
 		"IconInsetX"	"8"
 		"IconInsetY"	"-4"
 		"IconGap"		"24"
-		"IconFont"		"SquadIcon"
 
 		"PaintBackgroundType"	"2"
 	}
@@ -585,6 +665,8 @@
 	HudPoisonDamageIndicator	[$WIN32]
 	{
 		"fieldName"	"HudPoisonDamageIndicator"
+		"BgFeather"	"0"	// OF2: backdrop edges fade in over this distance (0 = crisp)
+		"BgCornerRadius"	"1.3"	// OF2: backdrop corner radius, about 3 px at 1080p (-1 = HL2's rounder corners)
 		"visible"	"0"
 		"enabled" "1"
 		"xpos"	"16"
@@ -594,12 +676,15 @@
 		"text_xpos"	"8"
 		"text_ypos"	"8"
 		"text_ygap" "14"
-		"TextColor"	"255 170 0 220"
+		"TextColor"	"230 150 0 220"
 		"PaintBackgroundType"	"2"
+		"TextFont"	"HudJetText"
 	}
 	HudPoisonDamageIndicator	[$X360]
 	{
 		"fieldName"	"HudPoisonDamageIndicator"
+		"BgFeather"	"0"	// OF2: backdrop edges fade in over this distance (0 = crisp)
+		"BgCornerRadius"	"1.3"	// OF2: backdrop corner radius, about 3 px at 1080p (-1 = HL2's rounder corners)
 		"visible"	"0"
 		"enabled" "1"
 		"xpos"	"48"
@@ -609,8 +694,9 @@
 		"text_xpos"	"8"
 		"text_ypos"	"6"
 		"text_ygap" "16"
-		"TextColor"	"255 170 0 220"
+		"TextColor"	"230 150 0 220"
 		"PaintBackgroundType"	"2"
+		"TextFont"	"HudJetText"
 	}
 
 	HudCredits

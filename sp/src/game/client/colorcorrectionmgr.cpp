@@ -10,6 +10,9 @@
 #include "colorcorrectionmgr.h"
 #ifdef MAPBASE // From Alien Swarm SDK
 #include "clientmode_shared.h" //"clientmode.h"
+#ifdef HL2_EPISODIC
+#include "of2_nightvision.h"	// OF2
+#endif
 
 // NOTE: This has to be the last file included!
 #include "tier0/memdbgon.h"
@@ -250,6 +253,10 @@ void CColorCorrectionMgr::UpdateColorCorrection()
 
 	UpdateColorCorrectionEntities( pPlayer, ccScale, g_ColorCorrectionList.Base(), g_ColorCorrectionList.Count() );
 	UpdateColorCorrectionVolumes( pPlayer, ccScale, g_ColorCorrectionVolumeList.Base(), g_ColorCorrectionVolumeList.Count() );
+#ifdef HL2_EPISODIC
+	// OF2: night vision overrides the map's corrections while it is on
+	OF2_NightVisionApplyColorCorrection();
+#endif
 	CommitColorCorrectionWeights();
 }
 #else

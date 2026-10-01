@@ -43,6 +43,7 @@ public:
 	bool	m_bAutoAimTarget;
 #ifdef HL2_EPISODIC
 	float	m_flFlashBattery;
+	bool	m_bNightVision;		// OF2: night vision replaces the flashlight
 	Vector	m_vecLocatorOrigin;
 #endif
 
