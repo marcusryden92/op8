@@ -50,6 +50,10 @@ public:
 	Activity	GetPrimaryAttackActivity( void );
 	void	SecondaryAttack( void );
 
+	// OF2: past CHLSelectFireMachineGun, which plays one "burst" sound for a whole burst.
+	// Every round makes the same sound here, whatever the fire mode.
+	void	WeaponSound( WeaponSound_t shoot_type, float soundtime = 0.0f ) { CHLMachineGun::WeaponSound( shoot_type, soundtime ); }
+
 	void FireNPCPrimaryAttack( CBaseCombatCharacter *pOperator, bool bUseWeaponAngles );
 
 	void Operator_ForceNPCFire( CBaseCombatCharacter  *pOperator, bool bSecondary );

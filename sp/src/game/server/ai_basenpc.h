@@ -632,6 +632,9 @@ public:
 	// Thinking, including core thinking, movement, animation
 	virtual void		NPCThink( void );
 
+	// OF2: NPCs that return true here are hurt by long falls (UpdateFallDamage)
+	virtual bool		TakesFallDamage( void ) { return false; }
+
 #ifdef MAPBASE
 	void				InputSetThinkNPC( inputdata_t &inputdata );
 #endif
@@ -713,6 +716,12 @@ private:
 
 	bool				PreNPCThink();
 	void				PostNPCThink();
+
+	// OF2: fall damage. Not saved; a fall in progress starts over after a load.
+	void				UpdateFallDamage();
+	bool				m_bFalling;
+	float				m_flFallTopZ;		// the highest it has been during this fall
+	float				m_flFallSpeed;		// the fastest it has been seen falling
 
 	bool				PreThink( void );
 	void				PerformSensing();

@@ -113,6 +113,7 @@ public:
 
 	Class_T			Classify( void );
 	bool			IsElite() { return m_fIsElite; }
+	virtual bool	TakesFallDamage( void ) { return true; }	// OF2
 #ifdef MAPBASE
 	bool			IsAltFireCapable();
 	bool			IsGrenadeCapable();

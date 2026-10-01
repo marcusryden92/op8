@@ -55,6 +55,7 @@ public:
 	void Precache( void );
 
 	Class_T		Classify( void );
+	virtual bool TakesFallDamage( void ) { return true; }	// OF2
 	Disposition_t IRelationType(CBaseEntity *pTarget);
 	float		MaxYawSpeed( void );
 	void		HandleAnimEvent( animevent_t *pEvent );

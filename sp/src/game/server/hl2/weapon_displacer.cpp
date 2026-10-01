@@ -55,7 +55,7 @@
 #define DISPLACER_GLOW_COLOR		150, 245, 215
 #define DISPLACER_CORE_COLOR		230, 255, 248
 
-ConVar of2_displacer_range( "of2_displacer_range", "1500", FCVAR_NONE, "How far away a Displacer destination or target can be marked, and how far the player can get from it before the signal is lost." );
+ConVar of2_displacer_range( "of2_displacer_range", "2500", FCVAR_NONE, "How far away a Displacer destination or target can be marked, and how far the player can get from it before the signal is lost." );
 ConVar of2_displacer_cooldown( "of2_displacer_cooldown", "0.5", FCVAR_NONE, "Seconds between Displacer shots or self-teleports." );
 ConVar of2_displacer_clear_hold( "of2_displacer_clear_hold", "0.5", FCVAR_NONE, "Holding reload this long clears the Displacer destination; letting go sooner teleports the player." );
 ConVar of2_displacer_portal_speed( "of2_displacer_portal_speed", "2600", FCVAR_NONE, "Speed of the Displacer's portal projectile." );

@@ -504,7 +504,9 @@ DECLARE_HUDELEMENT( CHudSecondaryAmmo );
 
 //-----------------------------------------------------------------------------
 // Purpose: OF2: fire mode of a weapon with a selector (Alyx's gun): one round
-//			for single fire, three for bursts, "AUTO" for automatic. It keeps
+//			for single fire, three for bursts (one over the other), "AUTO" for
+//			automatic. The round is the pistol's ammo icon, as on the pickup
+//			list: a character of the Half-Life 2 icon font. It keeps
 //			its place beside the ammo counter, which moves from weapon to weapon.
 //-----------------------------------------------------------------------------
 class CHudFireMode : public CHudElement, public vgui::Panel
@@ -520,15 +522,18 @@ protected:
 
 private:
 	C_HLSelectFireMachineGun *GetSelectFireWeapon( void );
-	void	DrawRound( int x, int y, int wide, int tall );
 
 	// The rounds and the text are centered in the panel both ways, so there are no positions
 	CPanelAnimationVar( vgui::HFont, m_hTextFont, "TextFont", "Default" );
 	CPanelAnimationVarAliasType( float, m_flAmmoGap, "AmmoGap", "22", "proportional_float" );	// between this panel and the ammo counter
 
-	CPanelAnimationVarAliasType( float, m_flRoundWidth, "RoundWidth", "4", "proportional_float" );
-	CPanelAnimationVarAliasType( float, m_flRoundHeight, "RoundHeight", "10", "proportional_float" );
-	CPanelAnimationVarAliasType( float, m_flRoundGap, "RoundGap", "3", "proportional_float" );
+	// The round: a character of an icon font. The font's line is much taller than the
+	// drawing in it, so the layout says where in the line the drawing is.
+	CPanelAnimationVar( vgui::HFont, m_hIconFont, "IconFont", "WeaponIconsSmall" );
+	CPanelAnimationStringVar( 8, m_szIconChar, "IconChar", "p" );
+	CPanelAnimationVar( float, m_flIconInkTop, "IconInkTop", "0.43" );		// top of the line to the top of the drawing, as a part of the line's height
+	CPanelAnimationVar( float, m_flIconInkTall, "IconInkTall", "0.15" );	// height of the drawing, the same way
+	CPanelAnimationVarAliasType( float, m_flRoundGap, "RoundGap", "2", "proportional_float" );
 };
 
 #ifdef HL2_EPISODIC
@@ -589,28 +594,6 @@ bool CHudFireMode::ShouldDraw( void )
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: one round standing on its base: a nose that widens in steps, the
-//			body, and the rim under a thin gap. Whole pixels and no rectangle
-//			over another. The width must be odd, for a nose in the middle.
-//-----------------------------------------------------------------------------
-void CHudFireMode::DrawRound( int x, int y, int wide, int tall )
-{
-	int step = MAX( 1, wide / 4 );	// height of each step of the nose, and of the rim
-	int gap = MAX( 1, step / 2 );
-	int bottom = y + tall;
-
-	for ( int w = MIN( 3, wide ); w < wide; w += 2 )
-	{
-		int inset = ( wide - w ) / 2;
-		surface()->DrawFilledRect( x + inset, y, x + inset + w, y + step );
-		y += step;
-	}
-
-	surface()->DrawFilledRect( x, y, x + wide, bottom - step - gap );
-	surface()->DrawFilledRect( x, bottom - step, x + wide, bottom );
-}
-
-//-----------------------------------------------------------------------------
 // Purpose: draws the rounds one pull of the trigger fires, or "AUTO"
 //-----------------------------------------------------------------------------
 void CHudFireMode::Paint()
@@ -655,18 +638,25 @@ void CHudFireMode::Paint()
 		return;
 	}
 
-	// Whole-pixel rounds, so they all come out the same size with the same gaps
-	int roundWide = MAX( 3, RoundFloatToInt( m_flRoundWidth ) ) | 1;
-	int roundTall = MAX( roundWide * 2, RoundFloatToInt( m_flRoundHeight ) );
+	// Where the drawing is inside the character, in whole pixels
+	wchar_t wchIcon = (wchar_t)m_szIconChar[0];
+	int fontTall = surface()->GetFontTall( m_hIconFont );
+	int inkTop = RoundFloatToInt( m_flIconInkTop * fontTall );
+	int inkTall = MAX( 1, RoundFloatToInt( m_flIconInkTall * fontTall ) );
 	int roundGap = MAX( 1, RoundFloatToInt( m_flRoundGap ) );
 
-	int rowWide = roundCount * roundWide + ( roundCount - 1 ) * roundGap;
-	int xpos = ( GetWide() - rowWide ) / 2, ypos = ( GetTall() - roundTall ) / 2;
+	int inkLeft, inkWide, inkRight;
+	surface()->GetCharABCwide( m_hIconFont, wchIcon, inkLeft, inkWide, inkRight );
 
-	surface()->DrawSetColor( clrFireMode );
+	int columnTall = roundCount * inkTall + ( roundCount - 1 ) * roundGap;
+	int xpos = ( GetWide() - inkWide ) / 2 - inkLeft, ypos = ( GetTall() - columnTall ) / 2 - inkTop;
+
+	surface()->DrawSetTextFont( m_hIconFont );
+	surface()->DrawSetTextColor( clrFireMode );
 	for ( int i = 0; i < roundCount; i++ )
 	{
-		DrawRound( xpos, ypos, roundWide, roundTall );
-		xpos += ( roundWide + roundGap );
+		surface()->DrawSetTextPos( xpos, ypos );
+		surface()->DrawUnicodeChar( wchIcon );
+		ypos += ( inkTall + roundGap );
 	}
 }

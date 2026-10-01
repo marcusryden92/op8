@@ -145,6 +145,10 @@ extern short		g_sModelIndexLaserDot;	// holds the index for the laser beam dot
 ConVar	ai_no_select_box( "ai_no_select_box", "0" );
 
 ConVar	ai_show_think_tolerance( "ai_show_think_tolerance", "0" );
+
+// OF2: fall damage for NPCs (CAI_BaseNPC::UpdateFallDamage)
+ConVar	of2_npc_fall_safe_height( "of2_npc_fall_safe_height", "220", FCVAR_NONE, "NPCs that take fall damage are unhurt by drops up to this many units." );
+ConVar	of2_npc_fall_lethal_height( "of2_npc_fall_lethal_height", "640", FCVAR_NONE, "A drop of this many units kills an NPC that takes fall damage; between the safe height and this it loses a matching share of its full health." );
 ConVar	ai_debug_think_ticks( "ai_debug_think_ticks", "0" );
 ConVar	ai_debug_doors( "ai_debug_doors", "0" );
 ConVar  ai_debug_enemies( "ai_debug_enemies", "0" );
@@ -4407,7 +4411,74 @@ void CAI_BaseNPC::CallNPCThink( void )
 	m_flLastRealThinkTime = gpGlobals->curtime;
 
 	PostNPCThink();
-} 
+
+	// OF2: last, because it can kill the NPC
+	UpdateFallDamage();
+}
+
+//-----------------------------------------------------------------------------
+// OF2: fall damage for the NPCs that return true from TakesFallDamage().
+// Watches for the NPC leaving the ground and hurts it when it lands, by how
+// far it dropped: nothing up to of2_npc_fall_safe_height, death from
+// of2_npc_fall_lethal_height.
+//-----------------------------------------------------------------------------
+void CAI_BaseNPC::UpdateFallDamage( void )
+{
+	if ( !TakesFallDamage() || !IsAlive() )
+		return;
+
+	// Off the ground on purpose: on a rappel rope (FL_FLY), riding something, in a
+	// scripted sequence, on a jump or climb of the navigator's, or in deep water
+	if ( GetMoveType() != MOVETYPE_STEP || ( GetFlags() & FL_FLY ) || GetMoveParent() != NULL ||
+		 m_NPCState == NPC_STATE_SCRIPT || GetNavType() == NAV_JUMP || GetNavType() == NAV_CLIMB || GetWaterLevel() >= 2 )
+	{
+		m_bFalling = false;
+		return;
+	}
+
+	float flZ = GetAbsOrigin().z;
+
+	if ( !( GetFlags() & FL_ONGROUND ) )
+	{
+		if ( !m_bFalling )
+		{
+			m_bFalling = true;
+			m_flFallTopZ = flZ;
+			m_flFallSpeed = 0.0f;
+		}
+
+		m_flFallTopZ = MAX( m_flFallTopZ, flZ );
+		m_flFallSpeed = MAX( m_flFallSpeed, -GetAbsVelocity().z );
+		return;
+	}
+
+	if ( !m_bFalling )
+		return;
+
+	m_bFalling = false;
+
+	// The drop itself, or the drop it takes to reach the speed it was seen falling at,
+	// whichever is more. The second covers one that was teleported while falling:
+	// it keeps its speed but the height starts over (see Teleport).
+	float flGravity = MAX( GetCurrentGravity(), 1.0f );
+	float flDrop = MAX( m_flFallTopZ - flZ, ( m_flFallSpeed * m_flFallSpeed ) / ( 2.0f * flGravity ) );
+
+	float flSafe = of2_npc_fall_safe_height.GetFloat();
+	float flLethal = MAX( of2_npc_fall_lethal_height.GetFloat(), flSafe + 1.0f );
+	if ( flDrop <= flSafe )
+		return;
+
+	float flFraction = ( flDrop - flSafe ) / ( flLethal - flSafe );
+	float flDamage = ( flFraction >= 1.0f ) ? MAX( GetHealth(), GetMaxHealth() ) : flFraction * GetMaxHealth();
+
+	EmitSound( "Player.FallDamage" );
+
+	CBaseEntity *pWorld = GetContainingEntity( INDEXENT( 0 ) );
+	CTakeDamageInfo info( pWorld, pWorld, flDamage, DMG_FALL );
+	info.SetDamagePosition( GetAbsOrigin() );
+	info.SetDamageForce( Vector( 0, 0, -1000 ) );
+	TakeDamage( info );
+}
 
 bool NPC_CheckBrushExclude( CBaseEntity *pEntity, CBaseEntity *pBrush )
 {
@@ -13308,6 +13379,11 @@ CAI_BaseNPC::CAI_BaseNPC(void)
 #endif
 	m_bDidDeathCleanup = false;
 
+	// OF2
+	m_bFalling = false;
+	m_flFallTopZ = 0.0f;
+	m_flFallSpeed = 0.0f;
+
 	m_afCapability				= 0;		// Make sure this is cleared in the base class
 
 	SetHullType(HULL_HUMAN);  // Give human hull by default, subclasses should override
@@ -14027,6 +14103,9 @@ void CAI_BaseNPC::Teleport( const Vector *newPosition, const QAngle *newAngles, 
 	CleanupScriptsOnTeleport( false );
 
 	BaseClass::Teleport( newPosition, newAngles, newVelocity );
+
+	// OF2: a fall is measured from here on
+	m_flFallTopZ = GetAbsOrigin().z;
 
 #ifdef MAPBASE // From Alien Swarm SDK
 	CheckPVSCondition();
