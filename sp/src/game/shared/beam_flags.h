@@ -32,7 +32,11 @@ enum
 	FBEAM_FOREVER			= 0x00004000,
 	FBEAM_HALOBEAM			= 0x00008000,		// When drawing a beam with a halo, don't ignore the segments and endwidth
 	FBEAM_REVERSED			= 0x00010000,
-	NUM_BEAM_FLAGS = 17	// KEEP THIS UPDATED!
+	// OF2: this end of a CBeam is in the player's hand (a held tether). The client
+	// puts it there every frame; the networked position only moves once a tick.
+	FBEAM_OF2_HELD_START	= 0x00020000,
+	FBEAM_OF2_HELD_END		= 0x00040000,
+	NUM_BEAM_FLAGS = 19	// KEEP THIS UPDATED!
 };
 
 #endif // BEAM_FLAGS_H

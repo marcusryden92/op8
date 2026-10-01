@@ -197,6 +197,7 @@ void CAI_RappelBehavior::StartTask( const Task_t *pTask )
 		{
 			CreateZipline();
 			SetDescentSpeed();
+			GetOuter()->SuspendFallDamage();	// OF2
 		}
 		break;
 
@@ -299,6 +300,9 @@ bool CAI_RappelBehavior::CanSelectSchedule()
 void CAI_RappelBehavior::GatherConditions()
 {
 	BaseClass::GatherConditions();
+
+	// OF2: this runs for as long as the NPC hangs waiting or comes down the rope; neither is a fall
+	GetOuter()->SuspendFallDamage();
 
 	if( HasCondition( COND_CAN_RANGE_ATTACK1 ) )
 	{

@@ -1295,6 +1295,222 @@ unsigned int CHL2GameMovement::PlayerSolidMask( bool brushOnly )
 	return ( mask | BaseClass::PlayerSolidMask( brushOnly ) );
 }
 
+#ifdef HL2_EPISODIC
+//-----------------------------------------------------------------------------
+// OF2: tether hang. While m_HL2Local.m_bOnTether is set the player is held
+// within m_flTetherSwingLength of m_vecTetherSwingPoint: on the ground they
+// walk as usual, in the air they are a pendulum. Whatever they hang from
+// (climb rope, Barnacle) sets those values; this code only lets go, and
+// changes the length when climbing.
+//-----------------------------------------------------------------------------
+ConVar of2_tether_hand_height( "of2_tether_hand_height", "56", FCVAR_REPLICATED, "How far above the player's feet a tether is held." );
+static ConVar of2_tether_damping( "of2_tether_damping", "0.15", FCVAR_REPLICATED, "Share of their speed a player hanging from a tether loses per second." );
+static ConVar of2_tether_min_length( "of2_tether_min_length", "24", FCVAR_REPLICATED, "Closest a player can climb to the point their tether swings from." );
+static ConVar of2_tether_release_up( "of2_tether_release_up", "120", FCVAR_REPLICATED, "Upward speed added when a player jumps off a tether." );
+static ConVar of2_tether_release_forward( "of2_tether_release_forward", "80", FCVAR_REPLICATED, "Forward speed added when a player jumps off a tether." );
+static ConVar of2_tether_pump_scale( "of2_tether_pump_scale", "0.5", FCVAR_REPLICATED, "Scales how hard forward/back pushes the swing on every tether, on top of each rope's own pump strength." );
+static ConVar of2_tether_climb_angle( "of2_tether_climb_angle", "20", FCVAR_REPLICATED, "Forward/back climbs a tether only while the player looks along it to within this many degrees (full speed within half of it). Outside it only pumps the swing." );
+
+float OF2_TetherHandHeight( CBasePlayer *pPlayer )
+{
+	// Inside the player's box when ducked too
+	return MIN( of2_tether_hand_height.GetFloat(), pPlayer->GetPlayerMaxs().z - 8.0f );
+}
+
+//-----------------------------------------------------------------------------
+// Where a held tether is drawn to: the hand, a little way in front of the
+// player so it doesn't run through the view. The player swings by the point
+// straight above their feet whichever way they look; this is for looks only.
+// The client asks every frame, for the ends of beams marked FBEAM_OF2_HELD_*.
+//-----------------------------------------------------------------------------
+static ConVar of2_tether_hold_forward( "of2_tether_hold_forward", "16", FCVAR_REPLICATED, "How far in front of the player a held tether is drawn." );
+
+Vector OF2_TetherHoldPos( CBasePlayer *pPlayer )
+{
+	QAngle angEyes;
+#ifdef CLIENT_DLL
+	engine->GetViewAngles( angEyes );
+#else
+	angEyes = pPlayer->EyeAngles();
+#endif
+
+	Vector vecForward;
+	AngleVectors( QAngle( 0, angEyes.y, 0 ), &vecForward );
+
+	return pPlayer->GetAbsOrigin() + Vector( 0, 0, OF2_TetherHandHeight( pPlayer ) ) + vecForward * of2_tether_hold_forward.GetFloat();
+}
+
+void CHL2GameMovement::FullWalkMove()
+{
+	CHL2_Player *pPlayer = GetHL2Player();
+	if ( !pPlayer->m_HL2Local.m_bOnTether )
+	{
+		BaseClass::FullWalkMove();
+		return;
+	}
+
+	bool bOnGround = ( player->GetGroundEntity() != NULL );
+
+	// Swimming lets go
+	if ( player->GetWaterLevel() >= WL_Waist )
+	{
+		pPlayer->m_HL2Local.m_bOnTether = false;
+		BaseClass::FullWalkMove();
+		return;
+	}
+
+	// So does jump in mid-air, with a push up and forwards. From the ground it
+	// is an ordinary jump with the tether still in hand.
+	if ( !bOnGround && ( mv->m_nButtons & IN_JUMP ) && !( mv->m_nOldButtons & IN_JUMP ) )
+	{
+		pPlayer->m_HL2Local.m_bOnTether = false;
+
+		Vector vecForward( m_vecForward.x, m_vecForward.y, 0.0f );
+		VectorNormalize( vecForward );
+		mv->m_vecVelocity += vecForward * of2_tether_release_forward.GetFloat();
+		mv->m_vecVelocity.z += of2_tether_release_up.GetFloat();
+
+		BaseClass::FullWalkMove();
+		return;
+	}
+
+	if ( bOnGround )
+	{
+		BaseClass::FullWalkMove();
+	}
+
+	Vector vecSwingPoint = pPlayer->m_HL2Local.m_vecTetherSwingPoint;
+	Vector vecUpTether = vecSwingPoint - ( mv->GetAbsOrigin() + Vector( 0, 0, OF2_TetherHandHeight( player ) ) );
+	float flDist = VectorNormalize( vecUpTether );
+
+	// Forward/back acts along the look direction: the part along the tether
+	// climbs, the part across it pumps the swing
+	float flInput = 0.0f;
+	if ( mv->m_nButtons & IN_FORWARD )
+	{
+		flInput += 1.0f;
+	}
+	if ( mv->m_nButtons & IN_BACK )
+	{
+		flInput -= 1.0f;
+	}
+
+	Vector vecWish = m_vecForward * flInput;
+	float flAlong = DotProduct( vecWish, vecUpTether );
+	Vector vecAcross = vecWish - vecUpTether * flAlong;
+
+	float flClimbAngle = clamp( of2_tether_climb_angle.GetFloat(), 1.0f, 89.0f );
+	float flClimb = RemapValClamped( fabs( flAlong ), cos( DEG2RAD( flClimbAngle ) ), cos( DEG2RAD( flClimbAngle * 0.5f ) ), 0.0f, 1.0f );
+	if ( flAlong < 0.0f )
+	{
+		flClimb = -flClimb;
+	}
+
+	// Standing, the tether runs through the hand: no slack to fall into when
+	// stepping off a ledge, and free to walk until all of it is out
+	float flLength = bOnGround ? flDist : pPlayer->m_HL2Local.m_flTetherSwingLength;
+	float flMaxLength = pPlayer->m_HL2Local.m_flTetherMaxLength;
+
+	flLength -= flClimb * pPlayer->m_HL2Local.m_flTetherClimbSpeed * gpGlobals->frametime;
+	flLength = clamp( flLength, MIN( of2_tether_min_length.GetFloat(), flMaxLength ), flMaxLength );
+	pPlayer->m_HL2Local.m_flTetherSwingLength = flLength;
+
+	if ( bOnGround )
+	{
+		// Climbing up takes the player off the ground; otherwise a tether at
+		// its full length only holds them back
+		if ( TetherConstrain( flClimb <= 0.0f ) )
+		{
+			SetGroundEntity( NULL );
+		}
+		return;
+	}
+
+	// Hanging: a pendulum, rigid when taut
+	StartGravity();
+
+	mv->m_vecVelocity += vecAcross * ( pPlayer->m_HL2Local.m_flTetherPump * of2_tether_pump_scale.GetFloat() * gpGlobals->frametime );
+	mv->m_vecVelocity *= pow( 1.0f - clamp( of2_tether_damping.GetFloat(), 0.0f, 1.0f ), gpGlobals->frametime );
+	CheckVelocity();
+
+	TryPlayerMove();
+	TetherConstrain( false );
+
+	CategorizePosition();
+	CheckVelocity();
+	FinishGravity();
+
+	if ( player->GetGroundEntity() != NULL )
+	{
+		mv->m_vecVelocity.z = 0.0f;
+	}
+
+	CheckFalling();
+}
+
+bool CHL2GameMovement::TetherConstrain( bool bStayOnGround )
+{
+	CHL2_Player *pPlayer = GetHL2Player();
+	Vector vecSwingPoint = pPlayer->m_HL2Local.m_vecTetherSwingPoint;
+	float flLength = pPlayer->m_HL2Local.m_flTetherSwingLength;
+	Vector vecHandOffset( 0, 0, OF2_TetherHandHeight( player ) );
+
+	// From the swing point out to the hand
+	Vector vecDir = mv->GetAbsOrigin() + vecHandOffset - vecSwingPoint;
+	float flDist = VectorNormalize( vecDir );
+	if ( flDist <= flLength )
+		return false;
+
+	// Taut. Back to where the tether reaches: straight towards the swing
+	// point, or along the ground if that is asked for and it reaches the ground.
+	bool bLifted = true;
+	Vector vecDest = vecSwingPoint + vecDir * flLength - vecHandOffset;
+
+	float flDrop = vecSwingPoint.z - ( mv->GetAbsOrigin().z + vecHandOffset.z );
+	Vector vecFlat( vecDir.x, vecDir.y, 0.0f );
+	if ( bStayOnGround && fabs( flDrop ) < flLength && VectorNormalize( vecFlat ) > 0.001f )
+	{
+		bLifted = false;
+		vecDir = vecFlat;
+		vecDest = vecSwingPoint + vecFlat * sqrt( flLength * flLength - flDrop * flDrop );
+		vecDest.z = mv->GetAbsOrigin().z;
+	}
+
+	trace_t pm;
+	TracePlayerBBox( mv->GetAbsOrigin(), vecDest, PlayerSolidMask(), COLLISION_GROUP_PLAYER_MOVEMENT, pm );
+	if ( !pm.startsolid )
+	{
+		mv->SetAbsOrigin( pm.endpos );
+	}
+
+	// Only the speed away from the swing point goes
+	float flOut = DotProduct( mv->m_vecVelocity, vecDir );
+	if ( flOut > 0.0f )
+	{
+		mv->m_vecVelocity -= vecDir * flOut;
+	}
+
+	// Past the highest the swing may go: nothing that takes it higher still
+	float flMaxAngle = pPlayer->m_HL2Local.m_flTetherMaxAngle;
+	if ( bLifted && flMaxAngle > 0.0f && flMaxAngle < 180.0f )
+	{
+		vecFlat.Init( vecDir.x, vecDir.y, 0.0f );
+		float flSin = VectorNormalize( vecFlat );
+		if ( -vecDir.z < cos( DEG2RAD( flMaxAngle ) ) && flSin > 0.001f )
+		{
+			Vector vecHigher = vecFlat * -vecDir.z + Vector( 0, 0, flSin );
+			float flHigher = DotProduct( mv->m_vecVelocity, vecHigher );
+			if ( flHigher > 0.0f )
+			{
+				mv->m_vecVelocity -= vecHigher * flHigher;
+			}
+		}
+	}
+
+	return bLifted;
+}
+#endif // HL2_EPISODIC
+
 #ifndef PORTAL	// Portal inherits from this but needs to declare it's own global interface
 	// Expose our interface.
 	static CHL2GameMovement g_GameMovement;

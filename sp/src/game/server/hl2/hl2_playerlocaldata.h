@@ -44,6 +44,17 @@ public:
 	CNetworkVar( float, m_flFlashBattery );
 	CNetworkVar( bool,	m_bNightVision );	// OF2: night vision replaces the flashlight
 	CNetworkVar( Vector, m_vecLocatorOrigin );
+
+	// OF2: tether hang (climb rope, Barnacle). Whatever the player hangs from fills
+	// these in; the movement code swings the player around the point, and changes
+	// the length when climbing.
+	CNetworkVar( bool,	m_bOnTether );
+	CNetworkVar( Vector, m_vecTetherSwingPoint );
+	CNetworkVar( float, m_flTetherSwingLength );
+	CNetworkVar( float, m_flTetherMaxLength );		// as far as climbing down goes
+	CNetworkVar( float, m_flTetherClimbSpeed );		// 0: no climbing
+	CNetworkVar( float, m_flTetherPump );			// 0: no pumping
+	CNetworkVar( float, m_flTetherMaxAngle );		// from straight down; 0: no limit
 #endif
 
 	// Ladder related data

@@ -518,6 +518,9 @@ BEGIN_DATADESC( CHL2_Player )
 
 	DEFINE_FIELD( m_nControlClass, FIELD_INTEGER ),
 	DEFINE_EMBEDDED( m_HL2Local ),
+#ifdef HL2_EPISODIC
+	DEFINE_FIELD( m_hTetherOwner, FIELD_EHANDLE ),	// OF2
+#endif
 
 	DEFINE_FIELD( m_bSprintEnabled, FIELD_BOOLEAN ),
 	DEFINE_FIELD( m_flTimeAllSuitDevicesOff, FIELD_TIME ),
@@ -837,6 +840,33 @@ void CHL2_Player::HandleArmorReduction( void )
 	SetArmorValue( iArmor );
 }
 
+#ifdef HL2_EPISODIC
+//-----------------------------------------------------------------------------
+// OF2: tether hang. The movement itself is CHL2GameMovement::FullWalkMove.
+//-----------------------------------------------------------------------------
+void CHL2_Player::StartTether( CBaseEntity *pOwner, float flClimbSpeed, float flPump, float flMaxAngle )
+{
+	m_hTetherOwner = pOwner;
+	m_HL2Local.m_flTetherClimbSpeed = flClimbSpeed;
+	m_HL2Local.m_flTetherPump = flPump;
+	m_HL2Local.m_flTetherMaxAngle = flMaxAngle;
+	m_HL2Local.m_bOnTether = true;
+}
+
+void CHL2_Player::UpdateTether( const Vector &vecSwingPoint, float flSwingLength, float flMaxLength )
+{
+	m_HL2Local.m_vecTetherSwingPoint = vecSwingPoint;
+	m_HL2Local.m_flTetherSwingLength = flSwingLength;
+	m_HL2Local.m_flTetherMaxLength = flMaxLength;
+}
+
+void CHL2_Player::StopTether( void )
+{
+	m_HL2Local.m_bOnTether = false;
+	m_hTetherOwner = NULL;
+}
+#endif
+
 //-----------------------------------------------------------------------------
 // Purpose: Allow pre-frame adjustments on the player
 //-----------------------------------------------------------------------------
@@ -861,6 +891,12 @@ void CHL2_Player::PreThink(void)
 	else
 	{
 		m_HL2Local.m_vecLocatorOrigin = vec3_invalid; // This tells the client we have no locator target.
+	}
+
+	// OF2: nothing left to hang from (it stayed behind in the last level), or in no state to hang
+	if ( m_HL2Local.m_bOnTether && ( m_hTetherOwner == NULL || !IsAlive() || GetMoveType() != MOVETYPE_WALK || IsInAVehicle() ) )
+	{
+		StopTether();
 	}
 #endif//HL2_EPISODIC
 

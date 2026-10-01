@@ -45,6 +45,15 @@ public:
 	float	m_flFlashBattery;
 	bool	m_bNightVision;		// OF2: night vision replaces the flashlight
 	Vector	m_vecLocatorOrigin;
+
+	// OF2: tether hang (climb rope, Barnacle); see hl2_playerlocaldata.h
+	bool	m_bOnTether;
+	Vector	m_vecTetherSwingPoint;
+	float	m_flTetherSwingLength;
+	float	m_flTetherMaxLength;
+	float	m_flTetherClimbSpeed;
+	float	m_flTetherPump;
+	float	m_flTetherMaxAngle;
 #endif
 
 	// Ladder related data

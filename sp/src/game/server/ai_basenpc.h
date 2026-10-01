@@ -635,6 +635,9 @@ public:
 	// OF2: NPCs that return true here are hurt by long falls (UpdateFallDamage)
 	virtual bool		TakesFallDamage( void ) { return false; }
 
+	// OF2: for a descent made on purpose (rappelling). No fall damage from now until it next stands on the ground.
+	void				SuspendFallDamage( void ) { m_bFallDamageSuspended = true; }
+
 #ifdef MAPBASE
 	void				InputSetThinkNPC( inputdata_t &inputdata );
 #endif
@@ -719,6 +722,7 @@ private:
 
 	// OF2: fall damage. Not saved; a fall in progress starts over after a load.
 	void				UpdateFallDamage();
+	bool				m_bFallDamageSuspended;
 	bool				m_bFalling;
 	float				m_flFallTopZ;		// the highest it has been during this fall
 	float				m_flFallSpeed;		// the fastest it has been seen falling

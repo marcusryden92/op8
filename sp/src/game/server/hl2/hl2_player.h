@@ -327,6 +327,18 @@ public:
 	virtual void		ExitLadder();
 	virtual surfacedata_t *GetLadderSurface( const Vector &origin );
 
+#ifdef HL2_EPISODIC
+	// OF2: tether hang (climb rope, Barnacle). pOwner is whatever the player hangs
+	// from; it keeps the swing point and lengths up to date and watches IsOnTether(),
+	// since the player can let go on their own (jump).
+	void				StartTether( CBaseEntity *pOwner, float flClimbSpeed, float flPump, float flMaxAngle );
+	void				UpdateTether( const Vector &vecSwingPoint, float flSwingLength, float flMaxLength );
+	void				StopTether( void );
+	bool				IsOnTether( void ) const { return m_HL2Local.m_bOnTether; }
+	CBaseEntity			*GetTetherOwner( void ) { return m_hTetherOwner; }
+	float				GetTetherSwingLength( void ) const { return m_HL2Local.m_flTetherSwingLength; }
+#endif
+
 	virtual void EquipSuit( bool bPlayEffects = true );
 	virtual void RemoveSuit( void );
 	void  HandleAdmireGlovesAnimation( void );
@@ -391,6 +403,10 @@ private:
 	// This player's HL2 specific data that should only be replicated to 
 	//  the player and not to other players.
 	CNetworkVarEmbedded( CHL2PlayerLocalData, m_HL2Local );
+
+#ifdef HL2_EPISODIC
+	EHANDLE				m_hTetherOwner;		// OF2
+#endif
 
 	float				m_flTimeAllSuitDevicesOff;
 

@@ -147,8 +147,10 @@ ConVar	ai_no_select_box( "ai_no_select_box", "0" );
 ConVar	ai_show_think_tolerance( "ai_show_think_tolerance", "0" );
 
 // OF2: fall damage for NPCs (CAI_BaseNPC::UpdateFallDamage)
-ConVar	of2_npc_fall_safe_height( "of2_npc_fall_safe_height", "220", FCVAR_NONE, "NPCs that take fall damage are unhurt by drops up to this many units." );
-ConVar	of2_npc_fall_lethal_height( "of2_npc_fall_lethal_height", "640", FCVAR_NONE, "A drop of this many units kills an NPC that takes fall damage; between the safe height and this it loses a matching share of its full health." );
+// 52.5 units to the meter: safe to just under 3 m, dead from a little over 5 m
+ConVar	of2_npc_fall_safe_height( "of2_npc_fall_safe_height", "150", FCVAR_NONE, "NPCs that take fall damage are unhurt by drops up to this many units." );
+ConVar	of2_npc_fall_lethal_height( "of2_npc_fall_lethal_height", "280", FCVAR_NONE, "A drop of this many units kills an NPC that takes fall damage; between the safe height and this it loses a matching share of its full health." );
+ConVar	of2_npc_fall_debug( "of2_npc_fall_debug", "0", FCVAR_NONE, "Print the drop, damage and health of each NPC landing that fall damage looked at." );
 ConVar	ai_debug_think_ticks( "ai_debug_think_ticks", "0" );
 ConVar	ai_debug_doors( "ai_debug_doors", "0" );
 ConVar  ai_debug_enemies( "ai_debug_enemies", "0" );
@@ -4427,8 +4429,20 @@ void CAI_BaseNPC::UpdateFallDamage( void )
 	if ( !TakesFallDamage() || !IsAlive() )
 		return;
 
-	// Off the ground on purpose: on a rappel rope (FL_FLY), riding something, in a
-	// scripted sequence, on a jump or climb of the navigator's, or in deep water
+	// A descent it is making on purpose (SuspendFallDamage: rappelling). Over once it stands on the ground.
+	if ( m_bFallDamageSuspended )
+	{
+		if ( GetFlags() & FL_ONGROUND )
+		{
+			m_bFallDamageSuspended = false;
+		}
+
+		m_bFalling = false;
+		return;
+	}
+
+	// Off the ground on purpose: flying, riding something, in a scripted sequence,
+	// on a jump or climb of the navigator's, or in deep water
 	if ( GetMoveType() != MOVETYPE_STEP || ( GetFlags() & FL_FLY ) || GetMoveParent() != NULL ||
 		 m_NPCState == NPC_STATE_SCRIPT || GetNavType() == NAV_JUMP || GetNavType() == NAV_CLIMB || GetWaterLevel() >= 2 )
 	{
@@ -4465,19 +4479,36 @@ void CAI_BaseNPC::UpdateFallDamage( void )
 
 	float flSafe = of2_npc_fall_safe_height.GetFloat();
 	float flLethal = MAX( of2_npc_fall_lethal_height.GetFloat(), flSafe + 1.0f );
-	if ( flDrop <= flSafe )
-		return;
 
-	float flFraction = ( flDrop - flSafe ) / ( flLethal - flSafe );
-	float flDamage = ( flFraction >= 1.0f ) ? MAX( GetHealth(), GetMaxHealth() ) : flFraction * GetMaxHealth();
+	float flDamage = 0.0f;
+	if ( flDrop >= flLethal )
+	{
+		// More than enough, whatever trims damage on the way in
+		flDamage = MAX( GetHealth(), GetMaxHealth() ) * 4.0f;
+	}
+	else if ( flDrop > flSafe )
+	{
+		flDamage = GetMaxHealth() * ( flDrop - flSafe ) / ( flLethal - flSafe );
+	}
 
-	EmitSound( "Player.FallDamage" );
+	int nHealthBefore = GetHealth();
 
-	CBaseEntity *pWorld = GetContainingEntity( INDEXENT( 0 ) );
-	CTakeDamageInfo info( pWorld, pWorld, flDamage, DMG_FALL );
-	info.SetDamagePosition( GetAbsOrigin() );
-	info.SetDamageForce( Vector( 0, 0, -1000 ) );
-	TakeDamage( info );
+	if ( flDamage > 0.0f )
+	{
+		EmitSound( "Player.FallDamage" );
+
+		CBaseEntity *pWorld = GetContainingEntity( INDEXENT( 0 ) );
+		CTakeDamageInfo info( pWorld, pWorld, flDamage, DMG_FALL );
+		info.SetDamagePosition( GetAbsOrigin() );
+		info.SetDamageForce( Vector( 0, 0, -1000 ) );
+		TakeDamage( info );
+	}
+
+	if ( of2_npc_fall_debug.GetBool() )
+	{
+		Msg( "%s landed: dropped %.0f units (height %.0f, speed %.0f), damage %.0f, health %d -> %d\n",
+			GetClassname(), flDrop, m_flFallTopZ - flZ, m_flFallSpeed, flDamage, nHealthBefore, GetHealth() );
+	}
 }
 
 bool NPC_CheckBrushExclude( CBaseEntity *pEntity, CBaseEntity *pBrush )
@@ -13380,6 +13411,7 @@ CAI_BaseNPC::CAI_BaseNPC(void)
 	m_bDidDeathCleanup = false;
 
 	// OF2
+	m_bFallDamageSuspended = false;
 	m_bFalling = false;
 	m_flFallTopZ = 0.0f;
 	m_flFallSpeed = 0.0f;

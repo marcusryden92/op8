@@ -528,9 +528,22 @@ const Vector &CBeam::GetAbsEndPos( void ) const
 //-----------------------------------------------------------------------------
 // Unlike the server, these take attachments into account
 //-----------------------------------------------------------------------------
+#ifdef HL2_EPISODIC
+// OF2: hl_gamemovement.cpp
+Vector OF2_TetherHoldPos( CBasePlayer *pPlayer );
+#endif
+
 const Vector &C_Beam::GetAbsStartPos( void ) const
 {
 	static Vector vecStartAbsPosition;
+#ifdef HL2_EPISODIC
+	// OF2: an end the local player holds follows their view, frame by frame
+	if ( ( m_nBeamFlags & FBEAM_OF2_HELD_START ) && C_BasePlayer::GetLocalPlayer() )
+	{
+		vecStartAbsPosition = OF2_TetherHoldPos( C_BasePlayer::GetLocalPlayer() );
+		return vecStartAbsPosition;
+	}
+#endif
 	if ( GetType() != BEAM_POINTS && GetType() != BEAM_HOSE ) 
 	{
 		if (ComputeBeamEntPosition( m_hAttachEntity[0], m_nAttachIndex[0], false, vecStartAbsPosition ))
@@ -544,6 +557,14 @@ const Vector &C_Beam::GetAbsStartPos( void ) const
 const Vector &C_Beam::GetAbsEndPos( void ) const
 {
 	static Vector vecEndAbsPosition;
+#ifdef HL2_EPISODIC
+	// OF2
+	if ( ( m_nBeamFlags & FBEAM_OF2_HELD_END ) && C_BasePlayer::GetLocalPlayer() )
+	{
+		vecEndAbsPosition = OF2_TetherHoldPos( C_BasePlayer::GetLocalPlayer() );
+		return vecEndAbsPosition;
+	}
+#endif
 	if ( GetType() != BEAM_POINTS && GetType() != BEAM_HOSE ) 
 	{
 		if (ComputeBeamEntPosition( m_hAttachEntity[m_nNumBeamEnts-1], m_nAttachIndex[m_nNumBeamEnts-1], false, vecEndAbsPosition ))

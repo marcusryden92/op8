@@ -20,6 +20,13 @@
 struct LadderMove_t;
 class CInfoLadderDismount;
 
+#ifdef HL2_EPISODIC
+// OF2: how far above the player's feet a tether is held
+float OF2_TetherHandHeight( CBasePlayer *pPlayer );
+// OF2: where a held tether is drawn to
+Vector OF2_TetherHoldPos( CBasePlayer *pPlayer );
+#endif
+
 struct NearbyDismount_t
 {
 	CInfoLadderDismount		*dismount;
@@ -46,6 +53,11 @@ public:
 
 	virtual unsigned int PlayerSolidMask( bool brushOnly = false );
 
+#ifdef HL2_EPISODIC
+	// OF2: hanging from a tether (climb rope, Barnacle)
+	virtual void FullWalkMove();
+#endif
+
 #ifdef MAPBASE
 	// Called by mappers who need a player to be on a ladder.
 	bool		ForcePlayerOntoLadder(CFuncLadder *ladder);
@@ -54,6 +66,12 @@ public:
 #endif
 
 private:
+
+#ifdef HL2_EPISODIC
+	// OF2: keeps the player within the tether's length of its swing point.
+	// True if that took them off their feet.
+	bool		TetherConstrain( bool bStayOnGround );
+#endif
 
 	// See if we are pressing use near a ladder "mount" point and if so, latch us onto the ladder
 	bool		CheckLadderAutoMount( CFuncLadder *ladder, const Vector& bestOrigin );

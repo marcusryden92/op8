@@ -32,6 +32,14 @@ BEGIN_SEND_TABLE_NOBASE( CHL2PlayerLocalData, DT_HL2Local )
 	SendPropFloat( SENDINFO(m_flFlashBattery) ),
 	SendPropBool( SENDINFO(m_bNightVision) ),	// OF2
 	SendPropVector( SENDINFO(m_vecLocatorOrigin) ),
+	// OF2: tether hang
+	SendPropBool( SENDINFO(m_bOnTether) ),
+	SendPropVector( SENDINFO(m_vecTetherSwingPoint) ),
+	SendPropFloat( SENDINFO(m_flTetherSwingLength) ),
+	SendPropFloat( SENDINFO(m_flTetherMaxLength) ),
+	SendPropFloat( SENDINFO(m_flTetherClimbSpeed) ),
+	SendPropFloat( SENDINFO(m_flTetherPump) ),
+	SendPropFloat( SENDINFO(m_flTetherMaxAngle) ),
 #endif
 END_SEND_TABLE()
 
@@ -49,6 +57,14 @@ BEGIN_SIMPLE_DATADESC( CHL2PlayerLocalData )
 	DEFINE_FIELD( m_flFlashBattery, FIELD_FLOAT ),
 	DEFINE_FIELD( m_bNightVision, FIELD_BOOLEAN ),	// OF2
 	DEFINE_FIELD( m_vecLocatorOrigin, FIELD_POSITION_VECTOR ),
+	// OF2: tether hang
+	DEFINE_FIELD( m_bOnTether, FIELD_BOOLEAN ),
+	DEFINE_FIELD( m_vecTetherSwingPoint, FIELD_POSITION_VECTOR ),
+	DEFINE_FIELD( m_flTetherSwingLength, FIELD_FLOAT ),
+	DEFINE_FIELD( m_flTetherMaxLength, FIELD_FLOAT ),
+	DEFINE_FIELD( m_flTetherClimbSpeed, FIELD_FLOAT ),
+	DEFINE_FIELD( m_flTetherPump, FIELD_FLOAT ),
+	DEFINE_FIELD( m_flTetherMaxAngle, FIELD_FLOAT ),
 #endif
 	// Ladder related stuff
 	DEFINE_FIELD( m_hLadder, FIELD_EHANDLE ),
@@ -67,6 +83,15 @@ CHL2PlayerLocalData::CHL2PlayerLocalData()
 #ifdef HL2_EPISODIC
 	m_flFlashBattery = 0.0f;
 	m_bNightVision = false;	// OF2
+
+	// OF2: tether hang
+	m_bOnTether = false;
+	m_vecTetherSwingPoint.GetForModify().Init();
+	m_flTetherSwingLength = 0.0f;
+	m_flTetherMaxLength = 0.0f;
+	m_flTetherClimbSpeed = 0.0f;
+	m_flTetherPump = 0.0f;
+	m_flTetherMaxAngle = 0.0f;
 #endif
 }
 
