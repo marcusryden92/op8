@@ -978,14 +978,17 @@ void CC_Player_PhysSwap( void )
 
 			const char *strWeaponName = pWeapon->GetName();
 
-			if ( !Q_stricmp( strWeaponName, "weapon_physcannon" ) )
+			// OF2: this key brings up the Displacer; the gravity gun only for a player without one
+			const char *strSwapWeapon = pPlayer->Weapon_OwnsThisType( "weapon_displacer" ) ? "weapon_displacer" : "weapon_physcannon";
+
+			if ( !Q_stricmp( strWeaponName, strSwapWeapon ) )
 			{
 				PhysCannonForceDrop( pWeapon, NULL );
 				pPlayer->SelectLastItem();
 			}
 			else
 			{
-				pPlayer->SelectItem( "weapon_physcannon" );
+				pPlayer->SelectItem( strSwapWeapon );
 			}
 		}
 	}
