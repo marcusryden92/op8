@@ -267,6 +267,9 @@ void CHLMachineGun::ItemPostFrame( void )
 }
 
 IMPLEMENT_SERVERCLASS_ST( CHLSelectFireMachineGun, DT_HLSelectFireMachineGun )
+	// OF2: for the HUD's fire mode indicator
+	SendPropInt( SENDINFO( m_iFireMode ), 2, SPROP_UNSIGNED ),
+	SendPropBool( SENDINFO( m_bFireSelector ) ),
 END_SEND_TABLE()
 
 //=========================================================
@@ -312,6 +315,22 @@ float CHLSelectFireMachineGun::GetFireRate( void )
 	}
 }
 
+//-----------------------------------------------------------------------------
+// Purpose: OF2: letting go of the trigger while the weapon is busy (reloading)
+//			counts too, or the first pull afterwards does nothing in single fire
+//-----------------------------------------------------------------------------
+void CHLSelectFireMachineGun::ItemBusyFrame( void )
+{
+	CBasePlayer *pOwner = ToBasePlayer( GetOwner() );
+
+	if ( pOwner && ( pOwner->m_nButtons & IN_ATTACK ) == false )
+	{
+		m_nShotsFired = 0;
+	}
+
+	BaseClass::ItemBusyFrame();
+}
+
 bool CHLSelectFireMachineGun::Deploy( void )
 {
 	// Forget about any bursts this weapon was firing when holstered
@@ -336,6 +355,16 @@ void CHLSelectFireMachineGun::PrimaryAttack( void )
 	case FIREMODE_FULLAUTO:
 		BaseClass::PrimaryAttack();
 		// Msg("%.3f\n", m_flNextPrimaryAttack.Get() );
+		SetWeaponIdleTime( gpGlobals->curtime + 3.0f );
+		break;
+
+	case FIREMODE_SEMI:
+		// OF2: one round for each pull of the trigger. m_nShotsFired counts up with
+		// every round and goes back to zero when the trigger is let go.
+		if ( m_nShotsFired > 0 )
+			return;
+
+		BaseClass::PrimaryAttack();
 		SetWeaponIdleTime( gpGlobals->curtime + 3.0f );
 		break;
 
@@ -408,11 +437,31 @@ void CHLSelectFireMachineGun::SecondaryAttack( void )
 //-----------------------------------------------------------------------------
 void CHLSelectFireMachineGun::BurstThink( void )
 {
+	// OF2: bursts never worked for the player (the SMG doesn't use them; Alyx's gun does now).
+	// PrimaryAttack() moves m_flNextPrimaryAttack a whole burst cycle ahead after the first
+	// round, and CHLMachineGun::PrimaryAttack() fires nothing while that time is in the
+	// future, so the second and third rounds were blanks. Let each round through, then
+	// put the time back. A reload ends the burst.
+	if ( m_bInReload )
+	{
+		m_iBurstSize = 0;
+		SetThink( NULL );
+		return;
+	}
+
+	float flNextAttack = m_flNextPrimaryAttack;
+	m_flNextPrimaryAttack = gpGlobals->curtime;
+
 	CHLMachineGun::PrimaryAttack();
+
+	if ( flNextAttack > gpGlobals->curtime )
+	{
+		m_flNextPrimaryAttack = flNextAttack;
+	}
 
 	m_iBurstSize--;
 
-	if( m_iBurstSize == 0 )
+	if( m_iBurstSize <= 0 )
 	{
 		// The burst is over!
 		SetThink(NULL);
@@ -436,6 +485,7 @@ void CHLSelectFireMachineGun::WeaponSound( WeaponSound_t shoot_type, float sound
 	{
 		switch( m_iFireMode )
 		{
+		case FIREMODE_SEMI:	// OF2
 		case FIREMODE_FULLAUTO:
 			BaseClass::WeaponSound( SINGLE, soundtime );
 			break;
@@ -523,4 +573,5 @@ CHLSelectFireMachineGun::CHLSelectFireMachineGun( void )
 	m_fMaxRange1	= 1024;
 	m_fMaxRange2	= 1024;
 	m_iFireMode		= FIREMODE_FULLAUTO;
+	m_bFireSelector	= false;	// OF2
 }

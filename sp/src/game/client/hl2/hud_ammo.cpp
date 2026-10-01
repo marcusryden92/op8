@@ -15,6 +15,8 @@
 #include <vgui/ILocalize.h>
 #include <vgui/ISurface.h>
 #include "ihudlcd.h"
+#include <vgui_controls/Panel.h>
+#include "c_basehlcombatweapon.h"	// OF2: CHudFireMode
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -500,3 +502,171 @@ private:
 
 DECLARE_HUDELEMENT( CHudSecondaryAmmo );
 
+//-----------------------------------------------------------------------------
+// Purpose: OF2: fire mode of a weapon with a selector (Alyx's gun): one round
+//			for single fire, three for bursts, "AUTO" for automatic. It keeps
+//			its place beside the ammo counter, which moves from weapon to weapon.
+//-----------------------------------------------------------------------------
+class CHudFireMode : public CHudElement, public vgui::Panel
+{
+	DECLARE_CLASS_SIMPLE( CHudFireMode, vgui::Panel );
+
+public:
+	CHudFireMode( const char *pElementName );
+	virtual bool ShouldDraw( void );
+
+protected:
+	virtual void Paint();
+
+private:
+	C_HLSelectFireMachineGun *GetSelectFireWeapon( void );
+	void	DrawRound( int x, int y, int wide, int tall );
+
+	// The rounds and the text are centered in the panel both ways, so there are no positions
+	CPanelAnimationVar( vgui::HFont, m_hTextFont, "TextFont", "Default" );
+	CPanelAnimationVarAliasType( float, m_flAmmoGap, "AmmoGap", "22", "proportional_float" );	// between this panel and the ammo counter
+
+	CPanelAnimationVarAliasType( float, m_flRoundWidth, "RoundWidth", "4", "proportional_float" );
+	CPanelAnimationVarAliasType( float, m_flRoundHeight, "RoundHeight", "10", "proportional_float" );
+	CPanelAnimationVarAliasType( float, m_flRoundGap, "RoundGap", "3", "proportional_float" );
+};
+
+#ifdef HL2_EPISODIC
+DECLARE_HUDELEMENT( CHudFireMode );
+#endif // HL2_EPISODIC
+
+//-----------------------------------------------------------------------------
+// Purpose: Constructor
+//-----------------------------------------------------------------------------
+CHudFireMode::CHudFireMode( const char *pElementName ) : CHudElement( pElementName ), BaseClass( NULL, "HudFireMode" )
+{
+	vgui::Panel *pParent = g_pClientMode->GetViewport();
+	SetParent( pParent );
+
+	// Hidden with the ammo counter
+	SetHiddenBits( HIDEHUD_HEALTH | HIDEHUD_PLAYERDEAD | HIDEHUD_NEEDSUIT | HIDEHUD_WEAPONSELECTION );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: the weapon in the player's hands, if its fire mode can be switched
+//-----------------------------------------------------------------------------
+C_HLSelectFireMachineGun *CHudFireMode::GetSelectFireWeapon( void )
+{
+	C_BasePlayer *pPlayer = C_BasePlayer::GetLocalPlayer();
+	if ( !pPlayer || pPlayer->IsInAVehicle() )
+		return NULL;
+
+	C_HLSelectFireMachineGun *pWeapon = dynamic_cast<C_HLSelectFireMachineGun *>( pPlayer->GetActiveWeapon() );
+	if ( !pWeapon || !pWeapon->m_bFireSelector )
+		return NULL;
+
+	return pWeapon;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: 
+//-----------------------------------------------------------------------------
+bool CHudFireMode::ShouldDraw( void )
+{
+	if ( !CHudElement::ShouldDraw() )
+		return false;
+
+	if ( !GetSelectFireWeapon() )
+		return false;
+
+	// To the left of the ammo counter, wherever that is for this weapon. The height is
+	// the layout's, on the row of the night vision and Displacer panels.
+	CHudAmmo *pAmmo = GET_HUDELEMENT( CHudAmmo );
+	if ( pAmmo )
+	{
+		int ammoX, ammoY, x, y;
+		pAmmo->GetPos( ammoX, ammoY );
+		GetPos( x, y );
+		SetPos( ammoX - RoundFloatToInt( m_flAmmoGap ) - GetWide(), y );
+	}
+
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: one round standing on its base: a nose that widens in steps, the
+//			body, and the rim under a thin gap. Whole pixels and no rectangle
+//			over another. The width must be odd, for a nose in the middle.
+//-----------------------------------------------------------------------------
+void CHudFireMode::DrawRound( int x, int y, int wide, int tall )
+{
+	int step = MAX( 1, wide / 4 );	// height of each step of the nose, and of the rim
+	int gap = MAX( 1, step / 2 );
+	int bottom = y + tall;
+
+	for ( int w = MIN( 3, wide ); w < wide; w += 2 )
+	{
+		int inset = ( wide - w ) / 2;
+		surface()->DrawFilledRect( x + inset, y, x + inset + w, y + step );
+		y += step;
+	}
+
+	surface()->DrawFilledRect( x, y, x + wide, bottom - step - gap );
+	surface()->DrawFilledRect( x, bottom - step, x + wide, bottom );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: draws the rounds one pull of the trigger fires, or "AUTO"
+//-----------------------------------------------------------------------------
+void CHudFireMode::Paint()
+{
+	C_HLSelectFireMachineGun *pWeapon = GetSelectFireWeapon();
+	if ( !pWeapon )
+		return;
+
+	Color clrFireMode = gHUD.m_clrNormal;
+	clrFireMode[3] = 255;
+
+	int roundCount = 0;
+	switch ( pWeapon->m_iFireMode )
+	{
+	case FIREMODE_SEMI:
+		roundCount = 1;
+		break;
+
+	case FIREMODE_3RNDBURST:
+		roundCount = 3;
+		break;
+	}
+
+	if ( roundCount == 0 )
+	{
+		const wchar_t *pszLabel = L"AUTO";
+		int labelLength = wcslen( pszLabel );
+		int labelWide = 0;
+		for ( int i = 0; i < labelLength; i++ )
+		{
+			labelWide += surface()->GetCharacterWidth( m_hTextFont, pszLabel[i] );
+		}
+
+		// The capitals stand on the baseline (the font's ascent) and are 0.62 of its
+		// line height tall; their middle goes in the middle of the panel, where the rounds' is
+		float flCapsMiddle = surface()->GetFontAscent( m_hTextFont, pszLabel[0] ) - 0.31f * surface()->GetFontTall( m_hTextFont );
+
+		surface()->DrawSetTextFont( m_hTextFont );
+		surface()->DrawSetTextColor( clrFireMode );
+		surface()->DrawSetTextPos( ( GetWide() - labelWide ) / 2, RoundFloatToInt( GetTall() * 0.5f - flCapsMiddle ) );
+		surface()->DrawPrintText( pszLabel, labelLength );
+		return;
+	}
+
+	// Whole-pixel rounds, so they all come out the same size with the same gaps
+	int roundWide = MAX( 3, RoundFloatToInt( m_flRoundWidth ) ) | 1;
+	int roundTall = MAX( roundWide * 2, RoundFloatToInt( m_flRoundHeight ) );
+	int roundGap = MAX( 1, RoundFloatToInt( m_flRoundGap ) );
+
+	int rowWide = roundCount * roundWide + ( roundCount - 1 ) * roundGap;
+	int xpos = ( GetWide() - rowWide ) / 2, ypos = ( GetTall() - roundTall ) / 2;
+
+	surface()->DrawSetColor( clrFireMode );
+	for ( int i = 0; i < roundCount; i++ )
+	{
+		DrawRound( xpos, ypos, roundWide, roundTall );
+		xpos += ( roundWide + roundGap );
+	}
+}

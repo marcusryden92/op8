@@ -314,7 +314,13 @@ void CBaseHLBludgeonWeapon::ImpactEffect( trace_t &traceHit )
 		return;
 
 	//FIXME: need new decals
+#ifdef MAPBASE
+	// OF2: the weapon's own damage type, so the knife's slash leaves a cut and not a dent.
+	// Still DMG_CLUB for everything else.
+	UTIL_ImpactTrace( &traceHit, GetDamageType() );
+#else
 	UTIL_ImpactTrace( &traceHit, DMG_CLUB );
+#endif
 }
 
 //------------------------------------------------------------------------------

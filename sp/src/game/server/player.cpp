@@ -6558,6 +6558,8 @@ void CBasePlayer::CheatImpulseCommands( int iImpulse )
 #ifdef HL2_EPISODIC
 		// GiveNamedItem( "weapon_magnade" );
 		GiveNamedItem( "weapon_displacer" );	// OF2
+		GiveNamedItem( "weapon_alyxgun" );		// OF2
+		GiveNamedItem( "weapon_knife" );		// OF2
 #endif
 		if ( GetHealth() < 100 )
 		{

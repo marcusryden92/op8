@@ -10,6 +10,7 @@
 #include "npcevent.h"
 #include "ai_basenpc.h"
 #include "globalstate.h"
+#include "gamestats.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -124,6 +125,11 @@ acttable_t	CWeaponAlyxGun::m_acttable[] =
 
 IMPLEMENT_ACTTABLE(CWeaponAlyxGun);
 
+// OF2: the gun is a player weapon as well, after SMOD: it can be picked up, secondary fire
+// switches between automatic and three-round bursts (CHLSelectFireMachineGun), and it has
+// a viewmodel (scripts\weapon_alyxgun.txt). Not archived; it resets on restart.
+ConVar of2_alyxgun_firerate( "of2_alyxgun_firerate", "0.1", FCVAR_NONE, "Seconds between the player's shots with Alyx's gun." );
+
 #define TOOCLOSETIMER_OFF	0.0f
 #define ALYX_TOOCLOSETIMER	1.0f		// Time an enemy must be tooclose before Alyx is allowed to shoot it.
 
@@ -134,6 +140,9 @@ CWeaponAlyxGun::CWeaponAlyxGun( )
 	m_fMaxRange1		= 5000;
 
 	m_flTooCloseTimer	= TOOCLOSETIMER_OFF;
+
+	// OF2: secondary fire switches modes, and the HUD shows the one it is in
+	m_bFireSelector		= true;
 
 #ifdef HL2_EPISODIC
 	m_fMinRange1		= 60;
@@ -336,10 +345,94 @@ const Vector& CWeaponAlyxGun::GetBulletSpread( void )
 	static const Vector cone = VECTOR_CONE_2DEGREES;
 	static const Vector injuredCone = VECTOR_CONE_6DEGREES;
 
-	if ( IsAlyxInInjuredMode() )
+	// OF2: her injury doesn't spoil the player's aim
+	if ( IsAlyxInInjuredMode() && !( GetOwner() && GetOwner()->IsPlayer() ) )
 		return injuredCone;
 
 	return cone;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: OF2: Alyx fires at her own pace; the player's can be tuned
+//-----------------------------------------------------------------------------
+float CWeaponAlyxGun::GetFireRate( void )
+{
+	if ( GetOwner() && GetOwner()->IsPlayer() )
+	{
+		// CHLMachineGun::PrimaryAttack() loops on this, so it must stay above zero
+		return MAX( of2_alyxgun_firerate.GetFloat(), 0.03f );
+	}
+
+	return 0.1f;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: OF2: the viewmodel has the same run of recoil animations as the SMG's
+//-----------------------------------------------------------------------------
+Activity CWeaponAlyxGun::GetPrimaryAttackActivity( void )
+{
+	if ( m_nShotsFired < 2 )
+		return ACT_VM_PRIMARYATTACK;
+
+	if ( m_nShotsFired < 3 )
+		return ACT_VM_RECOIL1;
+
+	if ( m_nShotsFired < 4 )
+		return ACT_VM_RECOIL2;
+
+	return ACT_VM_RECOIL3;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: OF2: switch fire modes: automatic, single, burst, and round again
+//			(left to right on the HUD: single, burst, automatic).
+//			The base class only goes between automatic and burst.
+//-----------------------------------------------------------------------------
+void CWeaponAlyxGun::SecondaryAttack( void )
+{
+	switch( m_iFireMode )
+	{
+	case FIREMODE_FULLAUTO:
+		m_iFireMode = FIREMODE_SEMI;
+		WeaponSound( SPECIAL1 );
+		break;
+
+	case FIREMODE_SEMI:
+		m_iFireMode = FIREMODE_3RNDBURST;
+		WeaponSound( SPECIAL2 );
+		break;
+
+	default:
+		m_iFireMode = FIREMODE_FULLAUTO;
+		WeaponSound( SPECIAL1 );
+		break;
+	}
+
+	m_flNextSecondaryAttack = gpGlobals->curtime + 0.3f;
+
+	CBasePlayer *pOwner = ToBasePlayer( GetOwner() );
+	if ( pOwner )
+	{
+		m_iSecondaryAttacks++;
+		gamestats->Event_WeaponFired( pOwner, false, GetClassname() );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: OF2: the SMG's kick
+//-----------------------------------------------------------------------------
+void CWeaponAlyxGun::AddViewKick( void )
+{
+	#define	EASY_DAMPEN			0.5f
+	#define	MAX_VERTICAL_KICK	1.0f	//Degrees
+	#define	SLIDE_LIMIT			2.0f	//Seconds
+
+	CBasePlayer *pPlayer = ToBasePlayer( GetOwner() );
+
+	if ( pPlayer == NULL )
+		return;
+
+	DoMachineGunKick( pPlayer, EASY_DAMPEN, MAX_VERTICAL_KICK, m_fFireDuration, SLIDE_LIMIT );
 }
 
 //-----------------------------------------------------------------------------

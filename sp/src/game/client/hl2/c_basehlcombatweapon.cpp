@@ -15,6 +15,9 @@ IMPLEMENT_CLIENTCLASS_DT( C_HLMachineGun, DT_HLMachineGun, CHLMachineGun )
 END_RECV_TABLE()
 
 IMPLEMENT_CLIENTCLASS_DT( C_HLSelectFireMachineGun, DT_HLSelectFireMachineGun, CHLSelectFireMachineGun )
+	// OF2: for the HUD's fire mode indicator
+	RecvPropInt( RECVINFO( m_iFireMode ) ),
+	RecvPropBool( RECVINFO( m_bFireSelector ) ),
 END_RECV_TABLE()
 
 IMPLEMENT_CLIENTCLASS_DT( C_BaseHLBludgeonWeapon, DT_BaseHLBludgeonWeapon, CBaseHLBludgeonWeapon )

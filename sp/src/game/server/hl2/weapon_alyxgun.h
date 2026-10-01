@@ -38,23 +38,25 @@ public:
 
 	virtual void Equip( CBaseCombatCharacter *pOwner );
 
-	float	GetFireRate( void ) { return 0.1f; }
+	float	GetFireRate( void );	// OF2: was 0.1f here; the player's rate is a convar
 	int		CapabilitiesGet( void ) { return bits_CAP_WEAPON_RANGE_ATTACK1; }
 	int		WeaponRangeAttack1Condition( float flDot, float flDist );
 	int		WeaponRangeAttack2Condition( float flDot, float flDist );
 
 	virtual const Vector& GetBulletSpread( void );
 
+	// OF2: the player's side of it
+	void	AddViewKick( void );
+	Activity	GetPrimaryAttackActivity( void );
+	void	SecondaryAttack( void );
+
 	void FireNPCPrimaryAttack( CBaseCombatCharacter *pOperator, bool bUseWeaponAngles );
 
 	void Operator_ForceNPCFire( CBaseCombatCharacter  *pOperator, bool bSecondary );
 	void Operator_HandleAnimEvent( animevent_t *pEvent, CBaseCombatCharacter *pOperator );
 
-	virtual void SetPickupTouch( void )
-	{
-		// Alyx gun cannot be picked up
-		SetTouch(NULL);
-	}
+	// OF2: the SetPickupTouch() override that made it impossible to pick up is gone;
+	// it is a player weapon now (scripts\weapon_alyxgun.txt)
 
 #ifdef MAPBASE
 	virtual acttable_t		*GetBackupActivityList() { return GetPistolActtable(); }

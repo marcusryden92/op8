@@ -16,6 +16,16 @@
 #define CBaseHLCombatWeapon C_BaseHLCombatWeapon
 #endif
 
+// Mode settings for select fire weapons
+// OF2: moved here from the server's basehlcombatweapon.h; the mode is networked
+// for the HUD's fire mode indicator (CHudFireMode in client\hl2\hud_ammo.cpp)
+enum
+{
+	FIREMODE_FULLAUTO = 1,
+	FIREMODE_SEMI,
+	FIREMODE_3RNDBURST,
+};
+
 class CBaseHLCombatWeapon : public CBaseCombatWeapon
 {
 #if !defined( CLIENT_DLL )

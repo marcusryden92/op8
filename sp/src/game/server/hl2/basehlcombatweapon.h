@@ -53,12 +53,7 @@ protected:
 // burst fire modes.
 //=========================================================
 // Mode settings for select fire weapons
-enum
-{
-	FIREMODE_FULLAUTO = 1,
-	FIREMODE_SEMI,
-	FIREMODE_3RNDBURST,
-};
+// OF2: the FIREMODE_ enum is in basehlcombatweapon_shared.h now, for the client
 
 //=========================================================
 //	>> CHLSelectFireMachineGun
@@ -86,12 +81,15 @@ public:
 
 	virtual void	PrimaryAttack( void );
 	virtual void	SecondaryAttack( void );
+	virtual void	ItemBusyFrame( void );	// OF2
 
 	virtual int		WeaponRangeAttack1Condition( float flDot, float flDist );
 	virtual int		WeaponRangeAttack2Condition( float flDot, float flDist );
 
 protected:
 	int m_iBurstSize;
-	int	m_iFireMode;
+	// OF2: both networked for the HUD's fire mode indicator.
+	CNetworkVar( int, m_iFireMode );
+	CNetworkVar( bool, m_bFireSelector );	// the player can switch modes on this weapon, so the HUD shows which one it is in
 };
 #endif // BASEHLCOMBATWEAPON_H
