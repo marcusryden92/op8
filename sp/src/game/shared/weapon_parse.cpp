@@ -411,6 +411,9 @@ FileWeaponInfo_t::FileWeaponInfo_t()
 	m_nHandRig = HANDRIG_DEFAULT;
 	m_nWeaponRestriction = WPNRESTRICT_NONE;
 #endif
+	m_vecViewmodelOffset.Init();	// OF2
+	m_angViewmodelOffset.Init();
+	m_flViewmodelScale = 1.0f;
 }
 
 #ifdef CLIENT_DLL
@@ -489,6 +492,13 @@ void FileWeaponInfo_t::Parse( KeyValues *pKeyValuesData, const char *szWeaponNam
 	m_bBuiltRightHanded = ( pKeyValuesData->GetInt( "BuiltRightHanded", 1 ) != 0 ) ? true : false;
 	m_bAllowFlipping = ( pKeyValuesData->GetInt( "AllowFlipping", 1 ) != 0 ) ? true : false;
 	m_bMeleeWeapon = ( pKeyValuesData->GetInt( "MeleeWeapon", 0 ) != 0 ) ? true : false;
+
+	// OF2: viewmodel placement. Three numbers each; anything missing stays 0.
+	m_vecViewmodelOffset.Init();
+	m_angViewmodelOffset.Init();
+	sscanf( pKeyValuesData->GetString( "viewmodel_offset", "" ), "%f %f %f", &m_vecViewmodelOffset.x, &m_vecViewmodelOffset.y, &m_vecViewmodelOffset.z );
+	sscanf( pKeyValuesData->GetString( "viewmodel_angles", "" ), "%f %f %f", &m_angViewmodelOffset.x, &m_angViewmodelOffset.y, &m_angViewmodelOffset.z );
+	m_flViewmodelScale = pKeyValuesData->GetFloat( "viewmodel_scale", 1.0f );
 
 #ifdef MAPBASE
 	m_flViewmodelFOV = pKeyValuesData->GetFloat( "viewmodel_fov", 0.0f );

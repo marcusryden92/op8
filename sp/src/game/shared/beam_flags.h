@@ -36,7 +36,8 @@ enum
 	// puts it there every frame; the networked position only moves once a tick.
 	FBEAM_OF2_HELD_START	= 0x00020000,
 	FBEAM_OF2_HELD_END		= 0x00040000,
-	NUM_BEAM_FLAGS = 19	// KEEP THIS UPDATED!
+	FBEAM_OF2_HELD_AT_WEAPON	= 0x00080000,		// ...where the held weapon is on screen, not in the free hand
+	NUM_BEAM_FLAGS = 20	// KEEP THIS UPDATED!
 };
 
 #endif // BEAM_FLAGS_H

@@ -865,6 +865,17 @@ void CHL2_Player::StopTether( void )
 	m_HL2Local.m_bOnTether = false;
 	m_hTetherOwner = NULL;
 }
+
+void CHL2_Player::Teleport( const Vector *newPosition, const QAngle *newAngles, const Vector *newVelocity )
+{
+	// Whatever the tether hangs from sees this on its next think and lets its end drop
+	if ( newPosition && m_HL2Local.m_bOnTether )
+	{
+		StopTether();
+	}
+
+	BaseClass::Teleport( newPosition, newAngles, newVelocity );
+}
 #endif
 
 //-----------------------------------------------------------------------------

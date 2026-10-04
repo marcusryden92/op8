@@ -24,7 +24,8 @@ class CInfoLadderDismount;
 // OF2: how far above the player's feet a tether is held
 float OF2_TetherHandHeight( CBasePlayer *pPlayer );
 // OF2: where a held tether is drawn to
-Vector OF2_TetherHoldPos( CBasePlayer *pPlayer );
+// (in the hand for a rope; at the held weapon for one that comes out of it)
+Vector OF2_TetherHoldPos( CBasePlayer *pPlayer, bool bAtWeapon = false );
 #endif
 
 struct NearbyDismount_t

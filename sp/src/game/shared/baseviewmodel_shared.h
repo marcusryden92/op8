@@ -131,6 +131,9 @@ public:
 
 	virtual void			ApplyBoneMatrixTransform( matrix3x4_t& transform );
 
+	// OF2: keeps the barnacle model's own tongue pulled in when it is a viewmodel (weapon_barnacle)
+	virtual void			StandardBlendingRules( CStudioHdr *pStudioHdr, Vector pos[], Quaternion q[], float currentTime, int boneMask );
+
 	virtual bool			ShouldDraw();
 	virtual int				DrawModel( int flags );
 	virtual int				InternalDrawModel( int flags );

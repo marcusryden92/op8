@@ -418,6 +418,50 @@ void CBaseViewModel::SendViewModelMatchingSequence( int sequence )
 
 #if defined( CLIENT_DLL )
 #include "ivieweffects.h"
+
+// OF2: viewmodel placement. A weapon's script gives its offset ("viewmodel_offset" and
+// "viewmodel_angles"); these are added on top for trying values out in game, and apply to
+// whatever weapon is held. Not archived. "viewmodel_scale" and of2_viewmodel_scale do the same
+// for its size. of2_viewmodel_print writes out the script lines.
+static ConVar of2_viewmodel_forward( "of2_viewmodel_forward", "0", FCVAR_NONE, "Moves the viewmodel away from the camera (units; negative is closer)." );
+static ConVar of2_viewmodel_right( "of2_viewmodel_right", "0", FCVAR_NONE, "Moves the viewmodel right (units; negative is left)." );
+static ConVar of2_viewmodel_up( "of2_viewmodel_up", "0", FCVAR_NONE, "Moves the viewmodel up (units; negative is down)." );
+static ConVar of2_viewmodel_pitch( "of2_viewmodel_pitch", "0", FCVAR_NONE, "Tilts the viewmodel down (degrees; negative is up)." );
+static ConVar of2_viewmodel_yaw( "of2_viewmodel_yaw", "0", FCVAR_NONE, "Turns the viewmodel left (degrees; negative is right)." );
+static ConVar of2_viewmodel_roll( "of2_viewmodel_roll", "0", FCVAR_NONE, "Rolls the viewmodel clockwise (degrees; negative is counterclockwise)." );
+static ConVar of2_viewmodel_scale( "of2_viewmodel_scale", "1", FCVAR_NONE, "Scales the viewmodel, on top of its script's \"viewmodel_scale\"." );
+
+static void OF2_GetViewModelOffset( C_BaseCombatWeapon *pWeapon, Vector &vecOffset, QAngle &angOffset )
+{
+	vecOffset.Init( of2_viewmodel_forward.GetFloat(), of2_viewmodel_right.GetFloat(), of2_viewmodel_up.GetFloat() );
+	angOffset.Init( of2_viewmodel_pitch.GetFloat(), of2_viewmodel_yaw.GetFloat(), of2_viewmodel_roll.GetFloat() );
+
+	if ( pWeapon != NULL )
+	{
+		vecOffset += pWeapon->GetWpnData().m_vecViewmodelOffset;
+		angOffset += pWeapon->GetWpnData().m_angViewmodelOffset;
+	}
+}
+
+CON_COMMAND( of2_viewmodel_print, "Prints the held weapon's viewmodel placement (its script's plus the of2_viewmodel_* convars) as weapon script lines." )
+{
+	C_BasePlayer *pPlayer = C_BasePlayer::GetLocalPlayer();
+	C_BaseCombatWeapon *pWeapon = pPlayer ? pPlayer->GetActiveWeapon() : NULL;
+	if ( pWeapon == NULL )
+	{
+		Msg( "No weapon held.\n" );
+		return;
+	}
+
+	Vector vecOffset;
+	QAngle angOffset;
+	OF2_GetViewModelOffset( pWeapon, vecOffset, angOffset );
+
+	Msg( "scripts/%s.txt:\n", pWeapon->GetClassname() );
+	Msg( "\t\"viewmodel_offset\"\t\t\"%g %g %g\"\n", vecOffset.x, vecOffset.y, vecOffset.z );
+	Msg( "\t\"viewmodel_angles\"\t\t\"%g %g %g\"\n", angOffset.x, angOffset.y, angOffset.z );
+	Msg( "\t\"viewmodel_scale\"\t\t\"%g\"\n", pWeapon->GetWpnData().m_flViewmodelScale * of2_viewmodel_scale.GetFloat() );
+}
 #endif
 
 void CBaseViewModel::CalcViewModelView( CBasePlayer *owner, const Vector& eyePosition, const QAngle& eyeAngles )
@@ -456,6 +500,27 @@ void CBaseViewModel::CalcViewModelView( CBasePlayer *owner, const Vector& eyePos
 		vieweffects->ApplyShake( vmorigin, vmangles, 0.1 );	
 	}
 #endif
+
+	// OF2: the weapon's placement, along the viewmodel's own axes so it rides the bob and lag
+	{
+		Vector vecOffset;
+		QAngle angOffset;
+		OF2_GetViewModelOffset( pWeapon, vecOffset, angOffset );
+
+		Vector vecForward, vecRight, vecUp;
+		AngleVectors( vmangles, &vecForward, &vecRight, &vecUp );
+
+		vmorigin += vecForward * vecOffset.x + vecRight * vecOffset.y + vecUp * vecOffset.z;
+		vmangles += angOffset;
+
+		// ...and its size. Every weapon shares the one viewmodel entity, so this is set for each.
+		float flScale = of2_viewmodel_scale.GetFloat() * ( pWeapon ? pWeapon->GetWpnData().m_flViewmodelScale : 1.0f );
+		flScale = clamp( flScale, 0.01f, 100.0f );
+		if ( GetModelScale() != flScale )
+		{
+			SetModelScale( flScale );
+		}
+	}
 
 	if( UseVR() )
 	{

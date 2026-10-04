@@ -35,7 +35,7 @@
 // A hit this close to where the trace was going is the surface that point sits on
 #define TETHER_ARRIVE_DIST		1.0f
 
-ConVar of2_tether_pivot_offset( "of2_tether_pivot_offset", "3", FCVAR_NONE, "How far off the corner a tether's pivot is put." );
+ConVar of2_tether_pivot_offset( "of2_tether_pivot_offset", "1.5", FCVAR_NONE, "How far off the corner a tether's pivot is put." );
 ConVar of2_tether_pivot_mindist( "of2_tether_pivot_mindist", "8", FCVAR_NONE, "A tether gets no new pivot closer than this to the one before it." );
 ConVar of2_tether_unwrap_angle( "of2_tether_unwrap_angle", "12", FCVAR_NONE, "A tether's pivot can go once the line bends less than this many degrees at it (and the way past it is clear)." );
 ConVar of2_tether_wrap_props( "of2_tether_wrap_props", "1", FCVAR_NONE, "Tethers wrap around static props as well as world brushes." );
@@ -49,8 +49,10 @@ BEGIN_SIMPLE_DATADESC( COF2Tether )
 	DEFINE_FIELD( m_flTotalLength,	FIELD_FLOAT ),
 	DEFINE_FIELD( m_iPlayerEnd,		FIELD_INTEGER ),
 	DEFINE_FIELD( m_iHeldEnd,		FIELD_INTEGER ),
+	DEFINE_FIELD( m_bHeldAtWeapon,	FIELD_BOOLEAN ),
 	DEFINE_FIELD( m_bWrap,			FIELD_BOOLEAN ),
 	DEFINE_ARRAY( m_hBeams,			FIELD_EHANDLE, OF2_TETHER_MAX_PIVOTS + 1 ),
+	DEFINE_FIELD( m_hEndEntity,		FIELD_EHANDLE ),
 END_DATADESC()
 
 COF2Tether::COF2Tether()
@@ -66,6 +68,7 @@ COF2Tether::COF2Tether()
 	m_flTotalLength = 0.0f;
 	m_iPlayerEnd = TETHER_END;
 	m_iHeldEnd = TETHER_NONE;
+	m_bHeldAtWeapon = false;
 	m_bWrap = true;
 }
 
@@ -381,11 +384,21 @@ void COF2Tether::UpdateBeams( const char *pszMaterial, float flWidth, const colo
 			pBeam->SetBrightness( color.a );
 			m_hBeams[i] = pBeam;
 		}
+		else if ( pBeam->GetType() != BEAM_POINTS )
+		{
+			// Was the last segment, tied to the end's entity, and isn't any more
+			pBeam->PointsInit( GetPoint( i ), GetPoint( i + 1 ) );
+		}
 		else
 		{
 			pBeam->SetAbsStartPos( GetPoint( i ) );
 			pBeam->SetAbsEndPos( GetPoint( i + 1 ) );
 			pBeam->RelinkBeam();
+		}
+
+		if ( i == nSegments - 1 && m_hEndEntity != NULL )
+		{
+			pBeam->PointEntInit( GetPoint( i ), m_hEndEntity );
 		}
 
 		int nFlags = 0;
@@ -396,6 +409,10 @@ void COF2Tether::UpdateBeams( const char *pszMaterial, float flWidth, const colo
 		if ( i == nSegments - 1 && m_iHeldEnd == TETHER_END )
 		{
 			nFlags |= FBEAM_OF2_HELD_END;
+		}
+		if ( nFlags != 0 && m_bHeldAtWeapon )
+		{
+			nFlags |= FBEAM_OF2_HELD_AT_WEAPON;
 		}
 		if ( pBeam->GetBeamFlags() != nFlags )
 		{

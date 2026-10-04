@@ -530,7 +530,7 @@ const Vector &CBeam::GetAbsEndPos( void ) const
 //-----------------------------------------------------------------------------
 #ifdef HL2_EPISODIC
 // OF2: hl_gamemovement.cpp
-Vector OF2_TetherHoldPos( CBasePlayer *pPlayer );
+Vector OF2_TetherHoldPos( CBasePlayer *pPlayer, bool bAtWeapon );
 #endif
 
 const Vector &C_Beam::GetAbsStartPos( void ) const
@@ -540,7 +540,7 @@ const Vector &C_Beam::GetAbsStartPos( void ) const
 	// OF2: an end the local player holds follows their view, frame by frame
 	if ( ( m_nBeamFlags & FBEAM_OF2_HELD_START ) && C_BasePlayer::GetLocalPlayer() )
 	{
-		vecStartAbsPosition = OF2_TetherHoldPos( C_BasePlayer::GetLocalPlayer() );
+		vecStartAbsPosition = OF2_TetherHoldPos( C_BasePlayer::GetLocalPlayer(), ( m_nBeamFlags & FBEAM_OF2_HELD_AT_WEAPON ) != 0 );
 		return vecStartAbsPosition;
 	}
 #endif
@@ -561,7 +561,7 @@ const Vector &C_Beam::GetAbsEndPos( void ) const
 	// OF2
 	if ( ( m_nBeamFlags & FBEAM_OF2_HELD_END ) && C_BasePlayer::GetLocalPlayer() )
 	{
-		vecEndAbsPosition = OF2_TetherHoldPos( C_BasePlayer::GetLocalPlayer() );
+		vecEndAbsPosition = OF2_TetherHoldPos( C_BasePlayer::GetLocalPlayer(), ( m_nBeamFlags & FBEAM_OF2_HELD_AT_WEAPON ) != 0 );
 		return vecEndAbsPosition;
 	}
 #endif

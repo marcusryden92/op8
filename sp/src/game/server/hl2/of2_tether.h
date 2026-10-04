@@ -47,6 +47,10 @@ public:
 	int		GetPointCount( void ) const				{ return m_nPivots + 2; }
 	const Vector &GetPoint( int iPoint ) const;
 	int		GetPivotCount( void ) const				{ return m_nPivots; }
+	// One more pivot, after the others (when laying a tether along a known path)
+	void	AppendPivot( const Vector &vecPivot, const Vector &vecOut )	{ if ( m_nPivots < OF2_TETHER_MAX_PIVOTS ) InsertPivot( m_nPivots, vecPivot, vecOut ); }
+	// Drops the pivots after the first nKeep, counted from the start
+	void	TruncatePivots( int nKeep )				{ m_nPivots = clamp( nKeep, 0, m_nPivots ); }
 
 	float	GetTotalLength( void ) const			{ return m_flTotalLength; }
 	void	SetTotalLength( float flLength )		{ m_flTotalLength = MAX( flLength, 0.0f ); }
@@ -77,7 +81,12 @@ public:
 
 	// The end the player has in hand, if any. Its beam is drawn to OF2_TetherHoldPos()
 	// on the client, frame by frame, instead of to where this end was last tick.
-	void	SetHeldEnd( OF2TetherEnd_t end )		{ m_iHeldEnd = end; }
+	// bAtWeapon: it comes out of the weapon they hold, rather than being held in the free hand.
+	void	SetHeldEnd( OF2TetherEnd_t end, bool bAtWeapon = false )	{ m_iHeldEnd = end; m_bHeldAtWeapon = bAtWeapon; }
+
+	// The thing the end is fixed to, if it is one that moves (a Barnacle bead). Its beam
+	// is tied to the entity, so on the client the two stay together between ticks.
+	void	SetEndEntity( CBaseEntity *pEntity )		{ m_hEndEntity = pEntity; }
 
 	// Draws the line as beams, one per segment. The alpha is the brightness.
 	void	UpdateBeams( const char *pszMaterial, float flWidth, const color32 &color );
@@ -114,9 +123,11 @@ private:
 
 	int		m_iPlayerEnd;
 	int		m_iHeldEnd;
+	bool	m_bHeldAtWeapon;
 	bool	m_bWrap;
 
 	EHANDLE	m_hBeams[OF2_TETHER_MAX_PIVOTS + 1];
+	EHANDLE	m_hEndEntity;
 };
 
 #endif // OF2_TETHER_H

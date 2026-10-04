@@ -337,6 +337,9 @@ public:
 	bool				IsOnTether( void ) const { return m_HL2Local.m_bOnTether; }
 	CBaseEntity			*GetTetherOwner( void ) { return m_hTetherOwner; }
 	float				GetTetherSwingLength( void ) const { return m_HL2Local.m_flTetherSwingLength; }
+
+	// OF2: being moved somewhere else (Displacer, trigger_teleport) lets go of a tether
+	virtual void		Teleport( const Vector *newPosition, const QAngle *newAngles, const Vector *newVelocity );
 #endif
 
 	virtual void EquipSuit( bool bPlayEffects = true );

@@ -18,6 +18,7 @@
 #include "tools/bonelist.h"
 #include <KeyValues.h>
 #include "hltvcamera.h"
+#include "bone_setup.h"	// OF2
 
 #if defined( REPLAY_ENABLED )
 #include "replay/replaycamera.h"
@@ -175,7 +176,18 @@ bool C_BaseViewModel::Interpolate( float currentTime )
 	}
 
 	float dt = elapsed_time * GetSequenceCycleRate( pStudioHdr, GetSequence() ) * GetPlaybackRate();
-	if ( dt >= 1.0f )
+
+	// OF2: a negative playback rate plays the sequence backwards, from its end
+	if ( GetPlaybackRate() < 0.0f )
+	{
+		if ( dt <= -1.0f )
+		{
+			dt = IsSequenceLooping( GetSequence() ) ? fmod( dt, 1.0f ) : -1.0f;
+		}
+
+		dt = MIN( dt + 1.0f, 0.999f );
+	}
+	else if ( dt >= 1.0f )
 	{
 		if ( !IsSequenceLooping( GetSequence() ) )
 		{
@@ -248,6 +260,33 @@ void C_BaseViewModel::ApplyBoneMatrixTransform( matrix3x4_t& transform )
 
 		// Transform back out of view space.
 		ConcatTransforms( viewMatrixInverse, temp, transform );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// OF2: the HL2 barnacle model's tongue is a row of bones that the NPC's client
+// code lays out along its tongue every frame (c_barnacle.cpp). As the Barnacle
+// weapon's viewmodel nothing does, and the tongue would stand out at its full
+// modelled length. The weapon draws its own tongue (c_of2_tongue.cpp), so the
+// model's is gathered up at its root, in the mouth.
+//-----------------------------------------------------------------------------
+#define OF2_BARNACLE_TONGUE_BONES	8
+
+void C_BaseViewModel::StandardBlendingRules( CStudioHdr *pStudioHdr, Vector pos[], Quaternion q[], float currentTime, int boneMask )
+{
+	BaseClass::StandardBlendingRules( pStudioHdr, pos, q, currentTime, boneMask );
+
+	if ( pStudioHdr == NULL )
+		return;
+
+	int iFirst = Studio_BoneIndexByName( pStudioHdr, "Barnacle.tongue1" );
+	if ( iFirst < 0 )
+		return;
+
+	for ( int i = 1; i < OF2_BARNACLE_TONGUE_BONES && iFirst + i < pStudioHdr->numbones(); i++ )
+	{
+		pos[iFirst + i] = pos[iFirst];
+		q[iFirst + i] = q[iFirst];
 	}
 }
 

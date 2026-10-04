@@ -5,27 +5,36 @@
 //			and then hangs from it: forward/back climbs when looking along
 //			the rope and pumps the swing otherwise, jump lets go.
 //
-//			The rope is a COF2Tether drawn as beams; the hanging itself is the
-//			player's tether movement (CHL2GameMovement::FullWalkMove).
+//			Held, the rope is a COF2Tether from the anchor to the hand, bending
+//			over edges; the hanging itself is the player's tether movement
+//			(CHL2GameMovement::FullWalkMove). Loose, it is a simulated rope
+//			(of2_rope_sim.cpp) that falls, swings and lies on the floor; that
+//			is what the player can catch.
+//
+//			The client draws it (client\hl2\c_of2_climbrope.cpp), simulating
+//			its own copy of the loose rope every frame.
 //
 //=============================================================================//
 
 #include "cbase.h"
 #include "of2_tether.h"
 #include "hl2_player.h"
-#include "beam_shared.h"
 #include "in_buttons.h"
 #include "hl_gamemovement.h"
-#include "beam_flags.h"
+#include "hl2/of2_rope_sim.h"
+#include "ndebugoverlay.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
 #define CLIMBROPE_DEFAULT_MATERIAL	"cable/of2_rope_beam.vmt"
 
-// The loose end is a pendulum of its own, for looks only
-#define CLIMBROPE_END_GRAVITY		600.0f
-#define CLIMBROPE_END_DAMPING		0.6f	// share of its speed lost per second
+// Bends the client is told about (C_OF2ClimbRope has the same)
+#define CLIMBROPE_MAX_BENDS			16
+
+// The sway pushes like gravity would on a rope held about m_flSway out
+// (c_of2_climbrope.cpp has the same)
+#define CLIMBROPE_SWAY_GRAVITY		600.0f
 
 // Use reaches this much further than touching does
 #define CLIMBROPE_USE_REACH			16.0f
@@ -35,19 +44,24 @@
 
 ConVar of2_climbrope_grab_dist( "of2_climbrope_grab_dist", "24", FCVAR_NONE, "How close the player's hand has to come to a climb rope to catch it in mid-air. Use reaches a little further." );
 ConVar of2_climbrope_regrab_time( "of2_climbrope_regrab_time", "1.0", FCVAR_NONE, "Seconds after letting go of a climb rope before touching it catches it again." );
-ConVar of2_climbrope_debug( "of2_climbrope_debug", "0", FCVAR_NONE, "Draw climb ropes' tethers as debug lines." );
+ConVar of2_climbrope_debug( "of2_climbrope_debug", "0", FCVAR_NONE, "Draw climb ropes' tethers, and the points of loose ones, as debug lines." );
 
-class CFuncClimbRope : public CPointEntity
+class CFuncClimbRope : public CBaseEntity
 {
-	DECLARE_CLASS( CFuncClimbRope, CPointEntity );
+	DECLARE_CLASS( CFuncClimbRope, CBaseEntity );
 	DECLARE_DATADESC();
+	DECLARE_SERVERCLASS();
 
 public:
 	CFuncClimbRope();
 
 	void	Precache( void );
 	void	Spawn( void );
+	void	OnRestore( void );
 	void	UpdateOnRemove( void );
+
+	// The client draws it wherever its anchor is
+	int		UpdateTransmitState( void ) { return SetTransmitState( FL_EDICT_ALWAYS ); }
 
 	void	RopeThink( void );
 
@@ -57,45 +71,59 @@ public:
 
 private:
 	const char *GetMaterial( void );
+	Vector	GetWind( void );
 
 	void	TryGrab( CHL2_Player *pPlayer );
 	void	Grab( CHL2_Player *pPlayer );
 	void	Release( void );
 
 	void	UpdateHeld( CHL2_Player *pPlayer );
-	void	UpdateLooseEnd( void );
-	void	UpdateTail( const Vector &vecHand );
-	void	RemoveTail( void );
+	void	UpdateClient( void );
 
 	COF2Tether	m_Tether;
 
-	float		m_flLength;
+	// Not saved: laid out hanging on a load (OnRestore)
+	COF2RopeSim	m_Sim;
+
+	CNetworkVar( float, m_flLength );
 	string_t	m_iszMaterial;
-	float		m_flWidth;
+	CNetworkVar( int, m_nRopeMaterial );
+	CNetworkVar( float, m_flWidth );
 	float		m_flPump;
 	float		m_flMaxAngle;
-	float		m_flSway;
+	CNetworkVar( float, m_flSway );
 	float		m_flClimbSpeed;
 	bool		m_bWrap;
 	bool		m_bTouchGrab;
 	bool		m_bDisabled;
 
-	CHandle<CHL2_Player>	m_hPlayer;
+	// The player holding it; how much of it runs from the anchor to their
+	// hand, and where it bends on the way. Left as they were on letting go:
+	// that is where the client's loose rope starts out from.
+	CNetworkHandle( CHL2_Player, m_hPlayer );
+	CNetworkVar( float, m_flHeldLength );
+	CNetworkArray( Vector, m_vecBends, CLIMBROPE_MAX_BENDS );
+	CNetworkVar( int, m_nBends );
+
 	float		m_flNextUseTime;
 	float		m_flNextTouchGrabTime;
-
-	// Where the end nobody holds is, and how it moves
-	Vector		m_vecLooseEnd;
-	Vector		m_vecLooseEndVelocity;
-
-	// The rope below the player's hand
-	EHANDLE		m_hTailBeam;
 
 	COutputEvent	m_OnGrab;
 	COutputEvent	m_OnRelease;
 };
 
 LINK_ENTITY_TO_CLASS( func_climbrope, CFuncClimbRope );
+
+IMPLEMENT_SERVERCLASS_ST( CFuncClimbRope, DT_FuncClimbRope )
+	SendPropFloat( SENDINFO( m_flLength ) ),
+	SendPropFloat( SENDINFO( m_flWidth ) ),
+	SendPropModelIndex( SENDINFO( m_nRopeMaterial ) ),
+	SendPropFloat( SENDINFO( m_flSway ) ),
+	SendPropEHandle( SENDINFO( m_hPlayer ) ),
+	SendPropFloat( SENDINFO( m_flHeldLength ) ),
+	SendPropArray3( SENDINFO_ARRAY3( m_vecBends ), SendPropVector( SENDINFO_ARRAY( m_vecBends ), -1, SPROP_COORD ) ),
+	SendPropInt( SENDINFO( m_nBends ), 5, SPROP_UNSIGNED ),
+END_SEND_TABLE()
 
 BEGIN_DATADESC( CFuncClimbRope )
 	DEFINE_EMBEDDED( m_Tether ),
@@ -112,11 +140,9 @@ BEGIN_DATADESC( CFuncClimbRope )
 	DEFINE_KEYFIELD( m_bDisabled,		FIELD_BOOLEAN,	"StartDisabled" ),
 
 	DEFINE_FIELD( m_hPlayer,				FIELD_EHANDLE ),
+	DEFINE_FIELD( m_flHeldLength,			FIELD_FLOAT ),
 	DEFINE_FIELD( m_flNextUseTime,			FIELD_TIME ),
 	DEFINE_FIELD( m_flNextTouchGrabTime,	FIELD_TIME ),
-	DEFINE_FIELD( m_vecLooseEnd,			FIELD_POSITION_VECTOR ),
-	DEFINE_FIELD( m_vecLooseEndVelocity,	FIELD_VECTOR ),
-	DEFINE_FIELD( m_hTailBeam,				FIELD_EHANDLE ),
 
 	DEFINE_THINKFUNC( RopeThink ),
 
@@ -132,7 +158,7 @@ CFuncClimbRope::CFuncClimbRope()
 {
 	m_flLength = 256.0f;
 	m_iszMaterial = NULL_STRING;
-	m_flWidth = 2.0f;
+	m_flWidth = 1.0f;
 	m_flPump = 120.0f;
 	m_flMaxAngle = 70.0f;
 	m_flSway = 4.0f;
@@ -159,7 +185,8 @@ void CFuncClimbRope::Precache( void )
 		m_iszMaterial = AllocPooledString( szMaterial );
 	}
 
-	PrecacheModel( GetMaterial() );
+	// The client finds the material by this index
+	m_nRopeMaterial = PrecacheModel( GetMaterial() );
 }
 
 void CFuncClimbRope::Spawn( void )
@@ -167,27 +194,58 @@ void CFuncClimbRope::Spawn( void )
 	Precache();
 	BaseClass::Spawn();
 
-	m_flLength = MAX( m_flLength, 32.0f );
+	SetSolid( SOLID_NONE );
+	SetMoveType( MOVETYPE_NONE );
 
-	m_vecLooseEnd = GetAbsOrigin() - Vector( 0, 0, m_flLength );
-	m_vecLooseEndVelocity.Init();
+	m_flLength = MAX( m_flLength.Get(), 32.0f );
 
-	m_Tether.Init( GetAbsOrigin(), m_vecLooseEnd, m_flLength );
+	// Wrapping traces start at the anchor, and can't from inside a brush. One
+	// placed in the ceiling it hangs from moves down to just below it.
+	if ( UTIL_PointContents( GetAbsOrigin() ) & CONTENTS_SOLID )
+	{
+		trace_t tr;
+		CTraceFilterWorldAndPropsOnly filter;
+		UTIL_TraceLine( GetAbsOrigin() - Vector( 0, 0, 32 ), GetAbsOrigin(), MASK_SOLID_BRUSHONLY, &filter, &tr );
+		if ( !tr.startsolid && tr.fraction < 1.0f )
+		{
+			SetAbsOrigin( tr.endpos - Vector( 0, 0, 1 ) );
+		}
+	}
+
+	m_Sim.SeedHanging( GetAbsOrigin(), m_flLength );
+
+	m_Tether.Init( GetAbsOrigin(), GetAbsOrigin() - Vector( 0, 0, m_flLength ), m_flLength );
 	m_Tether.SetPlayerEnd( TETHER_END );
-	// Wrapping comes with the next step
-	m_Tether.SetWrapping( false );
+	m_Tether.SetWrapping( m_bWrap );
 
 	SetThink( &CFuncClimbRope::RopeThink );
 	SetNextThink( gpGlobals->curtime + TICK_INTERVAL );
 }
 
+void CFuncClimbRope::OnRestore( void )
+{
+	BaseClass::OnRestore();
+
+	m_Sim.SeedHanging( GetAbsOrigin(), m_flLength );
+	UpdateClient();
+}
+
 void CFuncClimbRope::UpdateOnRemove( void )
 {
 	Release();
-	RemoveTail();
 	m_Tether.RemoveBeams();
 
 	BaseClass::UpdateOnRemove();
+}
+
+//-----------------------------------------------------------------------------
+// A slow push that wanders around, sized to hold the rope about m_flSway units out
+//-----------------------------------------------------------------------------
+Vector CFuncClimbRope::GetWind( void )
+{
+	float flPush = CLIMBROPE_SWAY_GRAVITY * m_flSway / MAX( m_flLength.Get(), 32.0f );
+	float flTime = gpGlobals->curtime + entindex();
+	return Vector( sin( flTime * 0.7f ) * flPush, cos( flTime * 0.53f ) * flPush, 0.0f );
 }
 
 void CFuncClimbRope::RopeThink( void )
@@ -212,18 +270,23 @@ void CFuncClimbRope::RopeThink( void )
 	}
 	else
 	{
-		UpdateLooseEnd();
-		m_Tether.Update( GetAbsOrigin(), m_vecLooseEnd );
-
+		m_Sim.Simulate( TICK_INTERVAL, GetAbsOrigin(), GetWind() );
 		TryGrab( static_cast<CHL2_Player *>( UTIL_GetLocalPlayer() ) );
 	}
 
-	color32 color = { 255, 255, 255, 255 };
-	m_Tether.UpdateBeams( GetMaterial(), m_flWidth, color );
-
 	if ( of2_climbrope_debug.GetBool() )
 	{
-		m_Tether.DebugDraw();
+		if ( pPlayer )
+		{
+			m_Tether.DebugDraw();
+		}
+		else
+		{
+			for ( int i = 1; i < m_Sim.GetNodeCount(); i++ )
+			{
+				NDebugOverlay::Line( m_Sim.GetNode( i - 1 ), m_Sim.GetNode( i ), 10, 204, 88, false, NDEBUG_PERSIST_TILL_NEXT_SERVER );
+			}
+		}
 	}
 }
 
@@ -233,49 +296,33 @@ void CFuncClimbRope::RopeThink( void )
 //-----------------------------------------------------------------------------
 void CFuncClimbRope::UpdateHeld( CHL2_Player *pPlayer )
 {
-	Vector vecHand = OF2_TetherHoldPos( pPlayer );
+	Vector vecHand = COF2Tether::GetPlayerHandPos( pPlayer );
 
 	float flFixed = m_Tether.GetFixedLength( TETHER_END );
-	m_Tether.SetTotalLength( MIN( flFixed + pPlayer->GetTetherSwingLength(), m_flLength ) );
+	m_Tether.SetTotalLength( MIN( flFixed + pPlayer->GetTetherSwingLength(), m_flLength.Get() ) );
 	m_Tether.Update( GetAbsOrigin(), vecHand );
 
+	// A pivot that came or went moved the point the player swings from, and
+	// with it how much rope is left on their side of it
 	flFixed = m_Tether.GetFixedLength( TETHER_END );
 	pPlayer->UpdateTether( m_Tether.GetSwingPoint(), m_Tether.GetSwingLength(), MAX( m_flLength - flFixed, 0.0f ) );
 
-	UpdateTail( vecHand );
+	UpdateClient();
 }
 
 //-----------------------------------------------------------------------------
-// The end nobody holds hangs from the anchor and sways a little. When the
-// player lets go it starts where their hand was, so it swings back by itself.
+// What the client draws a held rope by
 //-----------------------------------------------------------------------------
-void CFuncClimbRope::UpdateLooseEnd( void )
+void CFuncClimbRope::UpdateClient( void )
 {
-	float flFrameTime = TICK_INTERVAL;
+	m_flHeldLength = m_Tether.GetTotalLength();
 
-	m_vecLooseEndVelocity.z -= CLIMBROPE_END_GRAVITY * flFrameTime;
-
-	// A slow push that wanders around, sized to hold the end about m_flSway units out
-	float flPush = CLIMBROPE_END_GRAVITY * m_flSway / m_flLength;
-	float flTime = gpGlobals->curtime + entindex();
-	m_vecLooseEndVelocity.x += sin( flTime * 0.7f ) * flPush * flFrameTime;
-	m_vecLooseEndVelocity.y += cos( flTime * 0.53f ) * flPush * flFrameTime;
-
-	m_vecLooseEndVelocity *= pow( 1.0f - CLIMBROPE_END_DAMPING, flFrameTime );
-	m_vecLooseEnd += m_vecLooseEndVelocity * flFrameTime;
-
-	Vector vecDir = m_vecLooseEnd - GetAbsOrigin();
-	float flDist = VectorNormalize( vecDir );
-	if ( flDist > m_flLength )
+	int nBends = MIN( m_Tether.GetPivotCount(), CLIMBROPE_MAX_BENDS );
+	for ( int i = 0; i < nBends; i++ )
 	{
-		m_vecLooseEnd = GetAbsOrigin() + vecDir * m_flLength;
-
-		float flOut = DotProduct( m_vecLooseEndVelocity, vecDir );
-		if ( flOut > 0.0f )
-		{
-			m_vecLooseEndVelocity -= vecDir * flOut;
-		}
+		m_vecBends.Set( i, m_Tether.GetPoint( i + 1 ) );
 	}
+	m_nBends = nBends;
 }
 
 //-----------------------------------------------------------------------------
@@ -294,8 +341,8 @@ void CFuncClimbRope::TryGrab( CHL2_Player *pPlayer )
 	if ( !bUse && !bTouch )
 		return;
 
-	Vector vecHand = COF2Tether::GetPlayerHandPos( pPlayer );
-	float flDist = CalcDistanceToLineSegment( vecHand, GetAbsOrigin(), m_vecLooseEnd );
+	// Wherever the loose rope lies nearest
+	float flDist = m_Sim.GetDistance( COF2Tether::GetPlayerHandPos( pPlayer ), NULL );
 
 	float flReach = of2_climbrope_grab_dist.GetFloat() + ( bUse ? CLIMBROPE_USE_REACH : 0.0f );
 	if ( flDist > flReach )
@@ -308,16 +355,20 @@ void CFuncClimbRope::Grab( CHL2_Player *pPlayer )
 {
 	Vector vecHand = COF2Tether::GetPlayerHandPos( pPlayer );
 
-	// As much rope as it takes to reach the hand, so the player hangs where they took hold
-	float flLength = MIN( GetAbsOrigin().DistTo( vecHand ), m_flLength );
-	m_Tether.Init( GetAbsOrigin(), OF2_TetherHoldPos( pPlayer ), flLength );
+	// Held, the rope is only the tether: straight from the anchor to the hand,
+	// bending over what it swings across. Nothing of the loose rope's simulation
+	// carries over into the swing.
+	float flLength = MIN( GetAbsOrigin().DistTo( vecHand ), m_flLength.Get() );
+	m_Tether.Init( GetAbsOrigin(), vecHand, flLength );
+	float flFixed = 0.0f;
 
 	m_hPlayer = pPlayer;
 	m_flNextUseTime = gpGlobals->curtime + CLIMBROPE_USE_DELAY;
-	m_Tether.SetHeldEnd( TETHER_END );
 
 	pPlayer->StartTether( this, m_flClimbSpeed, m_flPump, m_flMaxAngle );
-	pPlayer->UpdateTether( GetAbsOrigin(), flLength, m_flLength );
+	pPlayer->UpdateTether( m_Tether.GetSwingPoint(), m_Tether.GetSwingLength(), MAX( m_flLength - flFixed, 0.0f ) );
+
+	UpdateClient();
 
 	m_OnGrab.FireOutput( pPlayer, this );
 }
@@ -337,65 +388,20 @@ void CFuncClimbRope::Release( void )
 	m_flNextUseTime = gpGlobals->curtime + CLIMBROPE_USE_DELAY;
 	m_flNextTouchGrabTime = gpGlobals->curtime + of2_climbrope_regrab_time.GetFloat();
 
-	// The rope swings on from where it was held
-	m_vecLooseEnd = OF2_TetherHoldPos( pPlayer );
-	m_vecLooseEndVelocity = pPlayer->GetAbsVelocity();
-	m_Tether.SetHeldEnd( TETHER_NONE );
-	m_Tether.Init( GetAbsOrigin(), m_vecLooseEnd, m_flLength );
+	// The loose rope starts out as it lay: from the anchor over the bends to
+	// the hand, the rest straight down from there, all moving with the player.
+	// The client does the same from what it drew.
+	Vector vecPath[CLIMBROPE_MAX_BENDS + 2];
+	int nPath = 0;
+	for ( int i = 0; i < m_Tether.GetPointCount() - 1 && nPath < CLIMBROPE_MAX_BENDS + 1; i++ )
+	{
+		vecPath[nPath++] = m_Tether.GetPoint( i );
+	}
+	vecPath[nPath++] = OF2_TetherHoldPos( pPlayer );
 
-	RemoveTail();
+	m_Sim.Seed( vecPath, nPath, m_flLength, pPlayer->GetAbsVelocity() );
 
 	m_OnRelease.FireOutput( pPlayer, this );
-}
-
-//-----------------------------------------------------------------------------
-// What is left of the rope below the hand: it carries on the way the rope
-// runs, sagging towards straight down, and stops at the floor
-//-----------------------------------------------------------------------------
-void CFuncClimbRope::UpdateTail( const Vector &vecHand )
-{
-	float flLeft = m_flLength - m_Tether.GetTotalLength();
-	if ( flLeft < 1.0f )
-	{
-		RemoveTail();
-		return;
-	}
-
-	Vector vecDir = vecHand - m_Tether.GetSwingPoint();
-	VectorNormalize( vecDir );
-	vecDir = vecDir * 0.5f + Vector( 0, 0, -1 );
-	VectorNormalize( vecDir );
-
-	trace_t tr;
-	CTraceFilterWorldAndPropsOnly filter;
-	UTIL_TraceLine( vecHand, vecHand + vecDir * flLeft, MASK_SOLID_BRUSHONLY, &filter, &tr );
-
-	CBeam *pBeam = static_cast<CBeam *>( m_hTailBeam.Get() );
-	if ( pBeam == NULL )
-	{
-		pBeam = CBeam::BeamCreate( GetMaterial(), m_flWidth );
-		if ( pBeam == NULL )
-			return;
-
-		pBeam->PointsInit( vecHand, tr.endpos );
-		pBeam->SetBeamFlags( FBEAM_OF2_HELD_START );
-		m_hTailBeam = pBeam;
-	}
-	else
-	{
-		pBeam->SetAbsStartPos( vecHand );
-		pBeam->SetAbsEndPos( tr.endpos );
-		pBeam->RelinkBeam();
-	}
-}
-
-void CFuncClimbRope::RemoveTail( void )
-{
-	if ( m_hTailBeam != NULL )
-	{
-		UTIL_Remove( m_hTailBeam );
-		m_hTailBeam = NULL;
-	}
 }
 
 void CFuncClimbRope::InputEnable( inputdata_t &inputdata )

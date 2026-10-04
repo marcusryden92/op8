@@ -150,6 +150,13 @@ public:
 	int						m_nWeaponRestriction;
 #endif
 
+	// OF2: where the viewmodel sits, relative to where its animations put it
+	// ("viewmodel_offset" "forward right up", "viewmodel_angles" "pitch yaw roll")
+	Vector					m_vecViewmodelOffset;
+	QAngle					m_angViewmodelOffset;
+	// ("viewmodel_scale", 1 if missing)
+	float					m_flViewmodelScale;
+
 // CLIENT DLL
 	// Sprite data, read from the data file
 	int						iSpriteCount;

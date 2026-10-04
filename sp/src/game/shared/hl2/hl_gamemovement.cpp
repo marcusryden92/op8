@@ -1324,8 +1324,15 @@ float OF2_TetherHandHeight( CBasePlayer *pPlayer )
 // The client asks every frame, for the ends of beams marked FBEAM_OF2_HELD_*.
 //-----------------------------------------------------------------------------
 static ConVar of2_tether_hold_forward( "of2_tether_hold_forward", "16", FCVAR_REPLICATED, "How far in front of the player a held tether is drawn." );
+static ConVar of2_tether_hold_left( "of2_tether_hold_left", "6", FCVAR_REPLICATED, "How far to the left of the player a held tether is drawn, to keep it off the weapon sights." );
 
-Vector OF2_TetherHoldPos( CBasePlayer *pPlayer )
+// A tether that comes out of the weapon in hand (the Barnacle) is drawn from
+// about where that is on screen instead: bottom right, turning with the view
+static ConVar of2_tether_weapon_forward( "of2_tether_weapon_forward", "20", FCVAR_REPLICATED, "How far in front of the eyes a tether coming out of the held weapon is drawn from." );
+static ConVar of2_tether_weapon_right( "of2_tether_weapon_right", "9", FCVAR_REPLICATED, "How far to the right of the eyes a tether coming out of the held weapon is drawn from." );
+static ConVar of2_tether_weapon_down( "of2_tether_weapon_down", "11", FCVAR_REPLICATED, "How far below the eyes a tether coming out of the held weapon is drawn from." );
+
+Vector OF2_TetherHoldPos( CBasePlayer *pPlayer, bool bAtWeapon )
 {
 	QAngle angEyes;
 #ifdef CLIENT_DLL
@@ -1334,10 +1341,22 @@ Vector OF2_TetherHoldPos( CBasePlayer *pPlayer )
 	angEyes = pPlayer->EyeAngles();
 #endif
 
-	Vector vecForward;
-	AngleVectors( QAngle( 0, angEyes.y, 0 ), &vecForward );
+	Vector vecForward, vecRight;
+	if ( bAtWeapon )
+	{
+		Vector vecUp;
+		AngleVectors( angEyes, &vecForward, &vecRight, &vecUp );
 
-	return pPlayer->GetAbsOrigin() + Vector( 0, 0, OF2_TetherHandHeight( pPlayer ) ) + vecForward * of2_tether_hold_forward.GetFloat();
+		return pPlayer->EyePosition()
+			+ vecForward * of2_tether_weapon_forward.GetFloat()
+			+ vecRight * of2_tether_weapon_right.GetFloat()
+			- vecUp * of2_tether_weapon_down.GetFloat();
+	}
+
+	AngleVectors( QAngle( 0, angEyes.y, 0 ), &vecForward, &vecRight, NULL );
+
+	return pPlayer->GetAbsOrigin() + Vector( 0, 0, OF2_TetherHandHeight( pPlayer ) )
+		+ vecForward * of2_tether_hold_forward.GetFloat() - vecRight * of2_tether_hold_left.GetFloat();
 }
 
 void CHL2GameMovement::FullWalkMove()
