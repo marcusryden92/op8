@@ -4,7 +4,7 @@
 //			Nobody holding it, it is a loose rope (of2_rope_sim.cpp) hanging from
 //			its anchor, simulated here every frame. Held, it runs from the
 //			anchor over the server's bends to the player's hand, and what is
-//			left of it hangs loose from the hand. Drawn as one smooth ribbon
+//			left of it hangs loose from the hand. Drawn as one smooth tube
 //			(of2_curve.cpp), with the texture counted from the anchor so that
 //			it stays put on the rope when the player climbs.
 //
@@ -32,12 +32,17 @@
 // nothing about it touches the player or the swing.
 #define CLIMBROPE_LOOSE_DAMPING	0.995f
 #define CLIMBROPE_TAIL_DAMPING	0.95f
+// The stretch between the anchor and the hand settles quickly too
+#define CLIMBROPE_UPPER_DAMPING	0.97f
 
 ConVar of2_climbrope_smooth( "of2_climbrope_smooth", "3", FCVAR_NONE, "How many pieces a climb rope is drawn in between two of its points. 1 draws straight lines." );
 ConVar of2_climbrope_texture_scale( "of2_climbrope_texture_scale", "1", FCVAR_NONE, "How long one copy of a climb rope's texture is, as a multiple of 50 units." );
+ConVar of2_climbrope_slack( "of2_climbrope_slack", "0.01", FCVAR_NONE, "How much longer than the straight line the rope above a hanging player is drawn, as a share. More bows and trails more in a swing; 0 is a straight line." );
 
 // c_of2_tongue.cpp
 extern ConVar of2_tongue_min_light;
+extern ConVar of2_tongue_round;
+extern ConVar of2_tongue_side_light;
 
 // hl_gamemovement.cpp
 Vector OF2_TetherHoldPos( CBasePlayer *pPlayer, bool bAtWeapon );
@@ -78,9 +83,21 @@ private:
 	Vector	m_vecBends[CLIMBROPE_MAX_BENDS];
 	int		m_nBends;
 
+	// Held: where the last straight stretch above the hand starts (the last
+	// bend, or the anchor), and how much rope there is from there to the hand
+	Vector	GetUpperRoot( void );
+	float	GetUpperLength( const Vector &vecHand );
+
 	// Loose, the whole rope from the anchor; held, the rest of it from the hand
 	COF2RopeSim	m_Sim;
 	bool	m_bWasHeld;
+
+	// Held, the stretch above the hand: fixed at both ends and a touch longer
+	// than the gap, so it bows and trails in a swing like a rope under load
+	// instead of standing like a stick. Only drawn; the player hangs by the
+	// straight line.
+	COF2RopeSim	m_Upper;
+	int		m_nUpperBends;
 
 	CMaterialReference	m_Material;
 };
@@ -105,6 +122,28 @@ C_OF2ClimbRope::C_OF2ClimbRope()
 	m_flHeldLength = 0.0f;
 	m_nBends = 0;
 	m_bWasHeld = false;
+	m_nUpperBends = -1;
+}
+
+Vector C_OF2ClimbRope::GetUpperRoot( void )
+{
+	int nBends = MIN( m_nBends, CLIMBROPE_MAX_BENDS );
+	return ( nBends > 0 ) ? m_vecBends[nBends - 1] : GetAbsOrigin();
+}
+
+float C_OF2ClimbRope::GetUpperLength( const Vector &vecHand )
+{
+	// What is held, less what lies between the anchor and the last bend
+	float flLength = m_flHeldLength;
+	Vector vecFrom = GetAbsOrigin();
+	for ( int i = 0; i < MIN( m_nBends, CLIMBROPE_MAX_BENDS ); i++ )
+	{
+		flLength -= vecFrom.DistTo( m_vecBends[i] );
+		vecFrom = m_vecBends[i];
+	}
+
+	// (never less than the gap, and that little bit more)
+	return MAX( flLength, vecFrom.DistTo( vecHand ) ) * ( 1.0f + MAX( of2_climbrope_slack.GetFloat(), 0.0f ) );
 }
 
 void C_OF2ClimbRope::OnDataChanged( DataUpdateType_t updateType )
@@ -148,6 +187,17 @@ int C_OF2ClimbRope::GetPath( Vector *pPoints, bool *pBend, bool bHeld )
 		{
 			pPoints[nPoints] = m_vecBends[i];
 			pBend[nPoints++] = true;
+		}
+
+		// From the last bend (or the anchor) to the hand, along the rope as it
+		// bows between the two. Its own first and last points are those two.
+		if ( m_Upper.IsSeeded() )
+		{
+			for ( int i = 1; i < m_Upper.GetNodeCount() - 1 && nPoints < OF2_CURVE_MAX_POINTS - OF2_ROPE_SIM_MAX_NODES - 1; i++ )
+			{
+				pPoints[nPoints] = m_Upper.GetNode( i );
+				pBend[nPoints++] = false;
+			}
 		}
 
 		pPoints[nPoints] = OF2_TetherHoldPos( pPlayer, false );
@@ -207,12 +257,32 @@ void C_OF2ClimbRope::ClientThink( void )
 		}
 
 		m_bWasHeld = bHeld;
+
+		// (the stretch above the hand is laid out anew on the next hold)
+		m_nUpperBends = -1;
 	}
 
 	if ( bHeld )
 	{
+		Vector vecHand = OF2_TetherHoldPos( pPlayer, false );
+
 		m_Sim.SetLength( GetTailLength() );
-		m_Sim.Simulate( gpGlobals->frametime, OF2_TetherHoldPos( pPlayer, false ), vec3_origin );
+		m_Sim.Simulate( gpGlobals->frametime, vecHand, vec3_origin );
+
+		// The stretch above the hand. Laid out straight when it is taken hold
+		// of, and again whenever a bend comes or goes (it starts somewhere else then).
+		Vector vecRoot = GetUpperRoot();
+		if ( !m_Upper.IsSeeded() || m_nUpperBends != m_nBends )
+		{
+			Vector vecPath[2] = { vecRoot, vecHand };
+			m_Upper.Seed( vecPath, 2, vecRoot.DistTo( vecHand ), pPlayer->GetAbsVelocity() );
+			m_Upper.SetDamping( CLIMBROPE_UPPER_DAMPING );
+			m_nUpperBends = m_nBends;
+		}
+
+		m_Upper.SetEndPin( vecHand );
+		m_Upper.SetLength( GetUpperLength( vecHand ) );
+		m_Upper.Simulate( gpGlobals->frametime, vecRoot, vec3_origin );
 	}
 	else
 	{
@@ -243,6 +313,15 @@ int C_OF2ClimbRope::DrawModel( int flags )
 	style.flTextureRepeat = MAX( CLIMBROPE_TEXTURE_REPEAT * of2_climbrope_texture_scale.GetFloat(), 0.1f );
 	style.nSmooth = of2_climbrope_smooth.GetInt();
 	style.flMinLight = of2_tongue_min_light.GetFloat();
+
+	// Round like the Barnacle's tongue, and by the same settings: darker towards its
+	// edges, each side taking the light that falls on it, and a round end. No
+	// thickening and no wet shine; those are the tongue's.
+	style.bTube = true;
+	style.flRound = of2_tongue_round.GetFloat();
+	style.flSideLight = of2_tongue_side_light.GetFloat();
+	style.flTipRadius = m_flWidth * 0.5f;
+	style.flTipLength = 8.0f;
 
 	OF2_DrawCurve( vecPoints, bBend, nPoints, style );
 	return 1;

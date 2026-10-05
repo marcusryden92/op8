@@ -331,12 +331,14 @@ public:
 	// OF2: tether hang (climb rope, Barnacle). pOwner is whatever the player hangs
 	// from; it keeps the swing point and lengths up to date and watches IsOnTether(),
 	// since the player can let go on their own (jump).
-	void				StartTether( CBaseEntity *pOwner, float flClimbSpeed, float flPump, float flMaxAngle );
-	void				UpdateTether( const Vector &vecSwingPoint, float flSwingLength, float flMaxLength );
+	void				StartTether( CBaseEntity *pOwner, float flClimbSpeed, float flPump, float flMaxAngle, bool bAtWeapon );
+	void				UpdateTether( const Vector &vecSwingPoint, const Vector &vecNextPoint, float flSwingLength, float flMaxLength );
 	void				StopTether( void );
 	bool				IsOnTether( void ) const { return m_HL2Local.m_bOnTether; }
 	CBaseEntity			*GetTetherOwner( void ) { return m_hTetherOwner; }
 	float				GetTetherSwingLength( void ) const { return m_HL2Local.m_flTetherSwingLength; }
+	// Being moved up onto an edge (CHL2GameMovement::TetherMantleMove): the owner gives it the length that takes
+	bool				IsTetherMantling( void ) const { return m_HL2Local.m_bOnTether && m_HL2Local.m_bTetherMantling; }
 
 	// OF2: being moved somewhere else (Displacer, trigger_teleport) lets go of a tether
 	virtual void		Teleport( const Vector *newPosition, const QAngle *newAngles, const Vector *newVelocity );

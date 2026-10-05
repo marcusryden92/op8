@@ -73,11 +73,14 @@ public:
 	OF2TetherEnd_t GetPlayerEnd( void ) const		{ return (OF2TetherEnd_t)m_iPlayerEnd; }
 	OF2TetherEnd_t GetFarEnd( void ) const			{ return ( m_iPlayerEnd == TETHER_START ) ? TETHER_END : TETHER_START; }
 	const Vector &GetSwingPoint( void ) const		{ return GetNearestPoint( GetPlayerEnd() ); }
+	// The point after that, going away from the player: where the line runs on to
+	// once it is past the swing point. The swing point itself if it is the far end.
+	const Vector &GetSwingNextPoint( void ) const;
 	float	GetSwingLength( void ) const			{ return GetFreeLength( GetPlayerEnd() ); }
 	float	GetFarEndAllowance( void ) const		{ return GetFreeLength( GetFarEnd() ); }
 
 	// Where a player holds a tether
-	static Vector GetPlayerHandPos( CBasePlayer *pPlayer );
+	static Vector GetPlayerHandPos( CBasePlayer *pPlayer, bool bAtWeapon = false );
 
 	// The end the player has in hand, if any. Its beam is drawn to OF2_TetherHoldPos()
 	// on the client, frame by frame, instead of to where this end was last tick.

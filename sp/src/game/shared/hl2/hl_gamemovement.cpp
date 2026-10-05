@@ -1310,6 +1310,15 @@ static ConVar of2_tether_release_up( "of2_tether_release_up", "120", FCVAR_REPLI
 static ConVar of2_tether_release_forward( "of2_tether_release_forward", "80", FCVAR_REPLICATED, "Forward speed added when a player jumps off a tether." );
 static ConVar of2_tether_pump_scale( "of2_tether_pump_scale", "0.5", FCVAR_REPLICATED, "Scales how hard forward/back pushes the swing on every tether, on top of each rope's own pump strength." );
 static ConVar of2_tether_climb_angle( "of2_tether_climb_angle", "20", FCVAR_REPLICATED, "Forward/back climbs a tether only while the player looks along it to within this many degrees (full speed within half of it). Outside it only pumps the swing." );
+static ConVar of2_tether_mantle( "of2_tether_mantle", "1", FCVAR_REPLICATED, "A player pulled all the way up to where their tether goes over an edge is moved up onto it, if there is room to stand there." );
+static ConVar of2_tether_mantle_speed( "of2_tether_mantle_speed", "220", FCVAR_REPLICATED, "Speed a player is moved up and onto an edge at the top of their tether." );
+static ConVar of2_tether_mantle_reach( "of2_tether_mantle_reach", "24", FCVAR_REPLICATED, "How far in from the edge a player is put down when moved up onto it." );
+static ConVar of2_tether_mantle_height( "of2_tether_mantle_height", "32", FCVAR_REPLICATED, "The ground a player is moved up onto can be this far above or below the point their tether swings from." );
+
+float OF2_TetherMinLength( void )
+{
+	return of2_tether_min_length.GetFloat();
+}
 
 float OF2_TetherHandHeight( CBasePlayer *pPlayer )
 {
@@ -1318,10 +1327,11 @@ float OF2_TetherHandHeight( CBasePlayer *pPlayer )
 }
 
 //-----------------------------------------------------------------------------
-// Where a held tether is drawn to: the hand, a little way in front of the
-// player so it doesn't run through the view. The player swings by the point
-// straight above their feet whichever way they look; this is for looks only.
-// The client asks every frame, for the ends of beams marked FBEAM_OF2_HELD_*.
+// Where a tether is held: the hand, a little way in front of the player so it
+// doesn't run through the view. This is both where it is drawn to and the
+// point the player hangs by, so the two can't be told apart: turning the view
+// carries the player's body around the tether, not the tether around them.
+// The client asks every frame, for drawing; the movement code every tick.
 //-----------------------------------------------------------------------------
 static ConVar of2_tether_hold_forward( "of2_tether_hold_forward", "16", FCVAR_REPLICATED, "How far in front of the player a held tether is drawn." );
 static ConVar of2_tether_hold_left( "of2_tether_hold_left", "6", FCVAR_REPLICATED, "How far to the left of the player a held tether is drawn, to keep it off the weapon sights." );
@@ -1332,6 +1342,29 @@ static ConVar of2_tether_weapon_forward( "of2_tether_weapon_forward", "20", FCVA
 static ConVar of2_tether_weapon_right( "of2_tether_weapon_right", "9", FCVAR_REPLICATED, "How far to the right of the eyes a tether coming out of the held weapon is drawn from." );
 static ConVar of2_tether_weapon_down( "of2_tether_weapon_down", "11", FCVAR_REPLICATED, "How far below the eyes a tether coming out of the held weapon is drawn from." );
 
+//-----------------------------------------------------------------------------
+// The same point from the eyes (bAtWeapon) or from the feet (otherwise), for
+// a player looking along angEyes
+//-----------------------------------------------------------------------------
+static Vector TetherHoldOffset( CBasePlayer *pPlayer, const QAngle &angEyes, bool bAtWeapon )
+{
+	Vector vecForward, vecRight;
+	if ( bAtWeapon )
+	{
+		Vector vecUp;
+		AngleVectors( angEyes, &vecForward, &vecRight, &vecUp );
+
+		return vecForward * of2_tether_weapon_forward.GetFloat()
+			+ vecRight * of2_tether_weapon_right.GetFloat()
+			- vecUp * of2_tether_weapon_down.GetFloat();
+	}
+
+	AngleVectors( QAngle( 0, angEyes.y, 0 ), &vecForward, &vecRight, NULL );
+
+	return Vector( 0, 0, OF2_TetherHandHeight( pPlayer ) )
+		+ vecForward * of2_tether_hold_forward.GetFloat() - vecRight * of2_tether_hold_left.GetFloat();
+}
+
 Vector OF2_TetherHoldPos( CBasePlayer *pPlayer, bool bAtWeapon )
 {
 	QAngle angEyes;
@@ -1341,22 +1374,23 @@ Vector OF2_TetherHoldPos( CBasePlayer *pPlayer, bool bAtWeapon )
 	angEyes = pPlayer->EyeAngles();
 #endif
 
-	Vector vecForward, vecRight;
+	return ( bAtWeapon ? pPlayer->EyePosition() : pPlayer->GetAbsOrigin() ) + TetherHoldOffset( pPlayer, angEyes, bAtWeapon );
+}
+
+//-----------------------------------------------------------------------------
+// OF2: the point the player hangs by, from their feet, while they are being moved
+//-----------------------------------------------------------------------------
+Vector CHL2GameMovement::TetherHandOffset( void )
+{
+	bool bAtWeapon = GetHL2Player()->m_HL2Local.m_bTetherAtWeapon;
+
+	Vector vecOffset = TetherHoldOffset( player, mv->m_vecViewAngles, bAtWeapon );
 	if ( bAtWeapon )
 	{
-		Vector vecUp;
-		AngleVectors( angEyes, &vecForward, &vecRight, &vecUp );
-
-		return pPlayer->EyePosition()
-			+ vecForward * of2_tether_weapon_forward.GetFloat()
-			+ vecRight * of2_tether_weapon_right.GetFloat()
-			- vecUp * of2_tether_weapon_down.GetFloat();
+		vecOffset += player->GetViewOffset();
 	}
 
-	AngleVectors( QAngle( 0, angEyes.y, 0 ), &vecForward, &vecRight, NULL );
-
-	return pPlayer->GetAbsOrigin() + Vector( 0, 0, OF2_TetherHandHeight( pPlayer ) )
-		+ vecForward * of2_tether_hold_forward.GetFloat() - vecRight * of2_tether_hold_left.GetFloat();
+	return vecOffset;
 }
 
 void CHL2GameMovement::FullWalkMove()
@@ -1393,13 +1427,20 @@ void CHL2GameMovement::FullWalkMove()
 		return;
 	}
 
+	// On the way up onto an edge: nothing else moves them until they are there
+	if ( pPlayer->m_HL2Local.m_bTetherMantling )
+	{
+		TetherMantleMove();
+		return;
+	}
+
 	if ( bOnGround )
 	{
 		BaseClass::FullWalkMove();
 	}
 
 	Vector vecSwingPoint = pPlayer->m_HL2Local.m_vecTetherSwingPoint;
-	Vector vecUpTether = vecSwingPoint - ( mv->GetAbsOrigin() + Vector( 0, 0, OF2_TetherHandHeight( player ) ) );
+	Vector vecUpTether = vecSwingPoint - ( mv->GetAbsOrigin() + TetherHandOffset() );
 	float flDist = VectorNormalize( vecUpTether );
 
 	// Forward/back acts along the look direction: the part along the tether
@@ -1445,6 +1486,28 @@ void CHL2GameMovement::FullWalkMove()
 		return;
 	}
 
+	// Pulled all the way up to where the tether goes over an edge (climbing, or
+	// whatever they hang from has taken in all there was): up onto it
+	if ( of2_tether_mantle.GetBool() )
+	{
+		float flMinLength = of2_tether_min_length.GetFloat();
+		bool bAtTop = flLength <= flMinLength + 1.0f && flDist <= flMinLength + 8.0f;
+		bool bPulling = flClimb > 0.0f || flMaxLength <= flMinLength + 1.0f;
+
+		// ...or, with nowhere to stand there, around it: out from under an
+		// overhang and up past its edge, to carry on up the tether beyond
+		Vector vecVia, vecDest;
+		if ( bAtTop && bPulling && ( FindTetherMantle( vecSwingPoint, &vecVia, &vecDest ) || FindTetherPass( vecSwingPoint, &vecVia, &vecDest ) ) )
+		{
+			pPlayer->m_HL2Local.m_bTetherMantling = true;
+			pPlayer->m_HL2Local.m_bTetherMantleVia = true;
+			pPlayer->m_HL2Local.m_vecTetherMantleVia = vecVia;
+			pPlayer->m_HL2Local.m_vecTetherMantleDest = vecDest;
+			TetherMantleMove();
+			return;
+		}
+	}
+
 	// Hanging: a pendulum, rigid when taut
 	StartGravity();
 
@@ -1467,12 +1530,214 @@ void CHL2GameMovement::FullWalkMove()
 	CheckFalling();
 }
 
+//-----------------------------------------------------------------------------
+// OF2: is there somewhere to stand next to the point the tether swings from?
+// That point is where the tether goes over an edge, or where it is fixed, so
+// the top of the ledge is right by it. Looks to each side of it for ground
+// the player fits on, that is above them, and that they can get to by going
+// straight up from where they hang (to pVia) and then across (to pDest, just
+// over the ground).
+//-----------------------------------------------------------------------------
+bool CHL2GameMovement::FindTetherMantle( const Vector &vecSwingPoint, Vector *pVia, Vector *pDest )
+{
+	Vector vecOrigin = mv->GetAbsOrigin();
+	float flReach = of2_tether_mantle_reach.GetFloat();
+	float flHeight = of2_tether_mantle_height.GetFloat();
+
+	// The way they look first, then the way the swing point is from them,
+	// then all round
+	Vector vecDirs[10];
+	int nDirs = 0;
+
+	vecDirs[nDirs++].Init( m_vecForward.x, m_vecForward.y, 0.0f );
+	vecDirs[nDirs++].Init( vecSwingPoint.x - vecOrigin.x, vecSwingPoint.y - vecOrigin.y, 0.0f );
+	for ( int i = 0; i < 8; i++ )
+	{
+		float flAngle = DEG2RAD( 45.0f * i );
+		vecDirs[nDirs++].Init( cos( flAngle ), sin( flAngle ), 0.0f );
+	}
+
+	for ( int i = 0; i < nDirs; i++ )
+	{
+		Vector vecDir = vecDirs[i];
+		if ( VectorNormalize( vecDir ) < 0.01f )
+			continue;
+
+		// Ground to stand on, there
+		Vector vecAbove = vecSwingPoint + vecDir * flReach;
+		Vector vecBelow = vecAbove;
+		vecAbove.z += flHeight;
+		vecBelow.z -= flHeight;
+
+		trace_t pm;
+		TracePlayerBBox( vecAbove, vecBelow, PlayerSolidMask(), COLLISION_GROUP_PLAYER_MOVEMENT, pm );
+		if ( pm.startsolid || pm.fraction == 1.0f || pm.plane.normal.z < 0.7f )
+			continue;
+
+		Vector vecDest = pm.endpos;
+		if ( vecDest.z < vecOrigin.z + 16.0f )
+			continue;
+
+		// The way there: up, then across
+		Vector vecUp( vecOrigin.x, vecOrigin.y, vecDest.z + 1.0f );
+		TracePlayerBBox( vecOrigin, vecUp, PlayerSolidMask(), COLLISION_GROUP_PLAYER_MOVEMENT, pm );
+		if ( pm.startsolid || pm.fraction < 1.0f )
+			continue;
+
+		Vector vecAcross( vecDest.x, vecDest.y, vecUp.z );
+		TracePlayerBBox( vecUp, vecAcross, PlayerSolidMask(), COLLISION_GROUP_PLAYER_MOVEMENT, pm );
+		if ( pm.startsolid || pm.fraction < 1.0f )
+			continue;
+
+		*pVia = vecUp;
+		*pDest = vecAcross;
+		return true;
+	}
+
+	return false;
+}
+
+//-----------------------------------------------------------------------------
+// OF2: the tether goes over an edge and on from there (m_vecTetherNextPoint),
+// and the player has been pulled up to that edge with the thing it is the edge
+// of in their way: hanging under an overhang, say, with the tether going up
+// around its lip. Is there a place just past the edge, along the way the
+// tether runs on, where they fit and from where their hand sees the next
+// point (so the tether comes off the edge)? And a way to it, in two straight
+// legs: out and then up, or up and then across.
+//-----------------------------------------------------------------------------
+bool CHL2GameMovement::FindTetherPass( const Vector &vecSwingPoint, Vector *pVia, Vector *pDest )
+{
+	CHL2_Player *pPlayer = GetHL2Player();
+
+	Vector vecNext = pPlayer->m_HL2Local.m_vecTetherNextPoint;
+	Vector vecOn = vecNext - vecSwingPoint;
+	float flOn = VectorNormalize( vecOn );
+	if ( flOn < 1.0f )
+		return false;
+
+	Vector vecOrigin = mv->GetAbsOrigin();
+	Vector vecHandOffset = TetherHandOffset();
+
+	// With the hand this far past the edge
+	float flPast = MIN( of2_tether_min_length.GetFloat() + 8.0f, flOn );
+	Vector vecBase = vecSwingPoint + vecOn * flPast - vecHandOffset;
+
+	// There, or failing that a little to any side of there: next to an edge
+	// the player's box is usually half in what the edge belongs to
+	static const float flRings[3] = { 0.0f, 18.0f, 34.0f };
+	for ( int r = 0; r < 3; r++ )
+	{
+		for ( int i = 0; i < ( ( r == 0 ) ? 1 : 8 ); i++ )
+		{
+			float flAngle = DEG2RAD( 45.0f * i );
+			Vector vecPlace = vecBase + Vector( cos( flAngle ), sin( flAngle ), 0.0f ) * flRings[r];
+
+			trace_t pm;
+			TracePlayerBBox( vecPlace, vecPlace, PlayerSolidMask(), COLLISION_GROUP_PLAYER_MOVEMENT, pm );
+			if ( pm.startsolid || pm.fraction < 1.0f )
+				continue;
+
+			// Past the edge, and the tether would run clear from the hand
+			Vector vecHand = vecPlace + vecHandOffset;
+			if ( DotProduct( vecHand - vecSwingPoint, vecOn ) <= 0.0f )
+				continue;
+
+			trace_t tr;
+			UTIL_TraceLine( vecHand, vecNext, MASK_SOLID_BRUSHONLY, player, COLLISION_GROUP_NONE, &tr );
+			if ( tr.startsolid || ( tr.fraction < 1.0f && tr.endpos.DistToSqr( vecNext ) > 4.0f * 4.0f ) )
+				continue;
+
+			// Out and then up, or up and then across
+			Vector vecVias[2];
+			vecVias[0].Init( vecPlace.x, vecPlace.y, vecOrigin.z );
+			vecVias[1].Init( vecOrigin.x, vecOrigin.y, vecPlace.z );
+			for ( int k = 0; k < 2; k++ )
+			{
+				TracePlayerBBox( vecOrigin, vecVias[k], PlayerSolidMask(), COLLISION_GROUP_PLAYER_MOVEMENT, pm );
+				if ( pm.startsolid || pm.fraction < 1.0f )
+					continue;
+
+				TracePlayerBBox( vecVias[k], vecPlace, PlayerSolidMask(), COLLISION_GROUP_PLAYER_MOVEMENT, pm );
+				if ( pm.startsolid || pm.fraction < 1.0f )
+					continue;
+
+				*pVia = vecVias[k];
+				*pDest = vecPlace;
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+//-----------------------------------------------------------------------------
+// OF2: moves the player the way FindTetherMantle or FindTetherPass found: in
+// a straight line to the way point, then in another to the end. The tether
+// doesn't hold them meanwhile; its length follows them, so they are still on
+// it when they arrive. Anything in the way ends it, and they hang again.
+//-----------------------------------------------------------------------------
+void CHL2GameMovement::TetherMantleMove( void )
+{
+	CHL2_Player *pPlayer = GetHL2Player();
+	bool bVia = pPlayer->m_HL2Local.m_bTetherMantleVia;
+	Vector vecTarget = pPlayer->m_HL2Local.m_vecTetherMantleDest;
+	if ( bVia )
+	{
+		vecTarget = pPlayer->m_HL2Local.m_vecTetherMantleVia;
+	}
+	Vector vecStart = mv->GetAbsOrigin();
+
+	float flSpeed = MAX( of2_tether_mantle_speed.GetFloat(), 10.0f );
+	float flStep = flSpeed * gpGlobals->frametime;
+
+	Vector vecGoal = vecTarget;
+	Vector vecDir = vecTarget - vecStart;
+	bool bReached = true;
+	if ( VectorNormalize( vecDir ) > flStep )
+	{
+		vecGoal = vecStart + vecDir * flStep;
+		bReached = false;
+	}
+
+	bool bArrived = bReached && !bVia;
+	if ( bReached && bVia )
+	{
+		pPlayer->m_HL2Local.m_bTetherMantleVia = false;
+	}
+
+	trace_t pm;
+	TracePlayerBBox( vecStart, vecGoal, PlayerSolidMask(), COLLISION_GROUP_PLAYER_MOVEMENT, pm );
+	if ( !pm.startsolid )
+	{
+		mv->SetAbsOrigin( pm.endpos );
+	}
+
+	bool bBlocked = pm.startsolid || pm.fraction < 1.0f;
+
+	// The tether runs out to wherever they are now
+	Vector vecHand = mv->GetAbsOrigin() + TetherHandOffset();
+	pPlayer->m_HL2Local.m_flTetherSwingLength = vecHand.DistTo( pPlayer->m_HL2Local.m_vecTetherSwingPoint );
+
+	if ( bArrived || bBlocked )
+	{
+		pPlayer->m_HL2Local.m_bTetherMantling = false;
+		mv->m_vecVelocity.Init();
+		CategorizePosition();
+		return;
+	}
+
+	SetGroundEntity( NULL );
+	mv->m_vecVelocity = vecDir * flSpeed;
+}
+
 bool CHL2GameMovement::TetherConstrain( bool bStayOnGround )
 {
 	CHL2_Player *pPlayer = GetHL2Player();
 	Vector vecSwingPoint = pPlayer->m_HL2Local.m_vecTetherSwingPoint;
 	float flLength = pPlayer->m_HL2Local.m_flTetherSwingLength;
-	Vector vecHandOffset( 0, 0, OF2_TetherHandHeight( player ) );
+	Vector vecHandOffset = TetherHandOffset();
 
 	// From the swing point out to the hand
 	Vector vecDir = mv->GetAbsOrigin() + vecHandOffset - vecSwingPoint;
@@ -1491,15 +1756,30 @@ bool CHL2GameMovement::TetherConstrain( bool bStayOnGround )
 	{
 		bLifted = false;
 		vecDir = vecFlat;
-		vecDest = vecSwingPoint + vecFlat * sqrt( flLength * flLength - flDrop * flDrop );
+		vecDest = vecSwingPoint + vecFlat * sqrt( flLength * flLength - flDrop * flDrop ) - vecHandOffset;
 		vecDest.z = mv->GetAbsOrigin().z;
 	}
 
-	trace_t pm;
-	TracePlayerBBox( mv->GetAbsOrigin(), vecDest, PlayerSolidMask(), COLLISION_GROUP_PLAYER_MOVEMENT, pm );
-	if ( !pm.startsolid )
+	// Something in the way doesn't stop them dead: they slide along it, as far
+	// towards where the tether wants them as it allows. (Pulled up against a
+	// wall or under an overhang, a straight pull would leave them stuck.)
+	for ( int i = 0; i < 3; i++ )
 	{
+		trace_t pm;
+		TracePlayerBBox( mv->GetAbsOrigin(), vecDest, PlayerSolidMask(), COLLISION_GROUP_PLAYER_MOVEMENT, pm );
+		if ( pm.startsolid )
+			break;
+
 		mv->SetAbsOrigin( pm.endpos );
+		if ( pm.fraction == 1.0f )
+			break;
+
+		Vector vecLeft = vecDest - pm.endpos;
+		vecLeft -= pm.plane.normal * DotProduct( vecLeft, pm.plane.normal );
+		if ( vecLeft.LengthSqr() < 0.1f * 0.1f )
+			break;
+
+		vecDest = pm.endpos + vecLeft;
 	}
 
 	// Only the speed away from the swing point goes

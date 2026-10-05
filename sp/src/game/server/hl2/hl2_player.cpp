@@ -844,17 +844,20 @@ void CHL2_Player::HandleArmorReduction( void )
 //-----------------------------------------------------------------------------
 // OF2: tether hang. The movement itself is CHL2GameMovement::FullWalkMove.
 //-----------------------------------------------------------------------------
-void CHL2_Player::StartTether( CBaseEntity *pOwner, float flClimbSpeed, float flPump, float flMaxAngle )
+void CHL2_Player::StartTether( CBaseEntity *pOwner, float flClimbSpeed, float flPump, float flMaxAngle, bool bAtWeapon )
 {
 	m_hTetherOwner = pOwner;
 	m_HL2Local.m_flTetherClimbSpeed = flClimbSpeed;
 	m_HL2Local.m_flTetherPump = flPump;
 	m_HL2Local.m_flTetherMaxAngle = flMaxAngle;
+	m_HL2Local.m_bTetherAtWeapon = bAtWeapon;
 	m_HL2Local.m_bOnTether = true;
+	m_HL2Local.m_bTetherMantling = false;
 }
 
-void CHL2_Player::UpdateTether( const Vector &vecSwingPoint, float flSwingLength, float flMaxLength )
+void CHL2_Player::UpdateTether( const Vector &vecSwingPoint, const Vector &vecNextPoint, float flSwingLength, float flMaxLength )
 {
+	m_HL2Local.m_vecTetherNextPoint = vecNextPoint;
 	m_HL2Local.m_vecTetherSwingPoint = vecSwingPoint;
 	m_HL2Local.m_flTetherSwingLength = flSwingLength;
 	m_HL2Local.m_flTetherMaxLength = flMaxLength;
@@ -863,6 +866,7 @@ void CHL2_Player::UpdateTether( const Vector &vecSwingPoint, float flSwingLength
 void CHL2_Player::StopTether( void )
 {
 	m_HL2Local.m_bOnTether = false;
+	m_HL2Local.m_bTetherMantling = false;
 	m_hTetherOwner = NULL;
 }
 

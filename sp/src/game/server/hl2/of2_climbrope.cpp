@@ -305,7 +305,7 @@ void CFuncClimbRope::UpdateHeld( CHL2_Player *pPlayer )
 	// A pivot that came or went moved the point the player swings from, and
 	// with it how much rope is left on their side of it
 	flFixed = m_Tether.GetFixedLength( TETHER_END );
-	pPlayer->UpdateTether( m_Tether.GetSwingPoint(), m_Tether.GetSwingLength(), MAX( m_flLength - flFixed, 0.0f ) );
+	pPlayer->UpdateTether( m_Tether.GetSwingPoint(), m_Tether.GetSwingNextPoint(), m_Tether.GetSwingLength(), MAX( m_flLength - flFixed, 0.0f ) );
 
 	UpdateClient();
 }
@@ -365,8 +365,8 @@ void CFuncClimbRope::Grab( CHL2_Player *pPlayer )
 	m_hPlayer = pPlayer;
 	m_flNextUseTime = gpGlobals->curtime + CLIMBROPE_USE_DELAY;
 
-	pPlayer->StartTether( this, m_flClimbSpeed, m_flPump, m_flMaxAngle );
-	pPlayer->UpdateTether( m_Tether.GetSwingPoint(), m_Tether.GetSwingLength(), MAX( m_flLength - flFixed, 0.0f ) );
+	pPlayer->StartTether( this, m_flClimbSpeed, m_flPump, m_flMaxAngle, false );
+	pPlayer->UpdateTether( m_Tether.GetSwingPoint(), m_Tether.GetSwingNextPoint(), m_Tether.GetSwingLength(), MAX( m_flLength - flFixed, 0.0f ) );
 
 	UpdateClient();
 

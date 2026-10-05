@@ -23,6 +23,8 @@ class CInfoLadderDismount;
 #ifdef HL2_EPISODIC
 // OF2: how far above the player's feet a tether is held
 float OF2_TetherHandHeight( CBasePlayer *pPlayer );
+// OF2: closest a player gets to the point their tether swings from
+float OF2_TetherMinLength( void );
 // OF2: where a held tether is drawn to
 // (in the hand for a rope; at the held weapon for one that comes out of it)
 Vector OF2_TetherHoldPos( CBasePlayer *pPlayer, bool bAtWeapon = false );
@@ -72,6 +74,14 @@ private:
 	// OF2: keeps the player within the tether's length of its swing point.
 	// True if that took them off their feet.
 	bool		TetherConstrain( bool bStayOnGround );
+
+	// OF2: at the top of a tether, where it goes over an edge: is there somewhere
+	// to stand up there, and moving the player onto it
+	bool		FindTetherMantle( const Vector &vecSwingPoint, Vector *pVia, Vector *pDest );
+	// OF2: ...or a way around it, when it is the edge of something overhead
+	bool		FindTetherPass( const Vector &vecSwingPoint, Vector *pVia, Vector *pDest );
+	void		TetherMantleMove( void );
+	Vector		TetherHandOffset( void );
 #endif
 
 	// See if we are pressing use near a ladder "mount" point and if so, latch us onto the ladder

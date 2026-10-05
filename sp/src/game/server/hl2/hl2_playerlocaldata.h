@@ -55,6 +55,12 @@ public:
 	CNetworkVar( float, m_flTetherClimbSpeed );		// 0: no climbing
 	CNetworkVar( float, m_flTetherPump );			// 0: no pumping
 	CNetworkVar( float, m_flTetherMaxAngle );		// from straight down; 0: no limit
+	CNetworkVar( bool,	m_bTetherAtWeapon );		// held where the weapon is on screen, not in the free hand
+	CNetworkVar( bool,	m_bTetherMantling );		// being moved up onto the edge next to the swing point
+	CNetworkVar( Vector, m_vecTetherMantleDest );	// where they will stand
+	CNetworkVar( Vector, m_vecTetherMantleVia );	// ...by way of here
+	CNetworkVar( bool,	m_bTetherMantleVia );		// not there yet
+	CNetworkVar( Vector, m_vecTetherNextPoint );	// where the tether runs on to past the swing point
 #endif
 
 	// Ladder related data

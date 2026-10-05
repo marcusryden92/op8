@@ -27,6 +27,11 @@ struct OF2CurveStyle_t
 		flShine = 0.0f;
 		flShineWidth = 0.5f;
 		flMinLight = 0.25f;
+		bTube = false;
+		flRound = 0.5f;
+		flSideLight = 1.0f;
+		flTipRadius = 0.0f;
+		flTipLength = 0.0f;
 	}
 
 	IMaterial	*pMaterial;
@@ -44,6 +49,20 @@ struct OF2CurveStyle_t
 	float		flShine;
 	float		flShineWidth;		// share of flWidth
 	float		flMinLight;			// it never gets darker than this
+
+	// Shaded across its width as the round thing it is, instead of flat:
+	// darker towards the edges (flRound: 0 not at all, 1 down to black), and
+	// each side brighter or darker with the light that falls on it from there
+	// (flSideLight: 0 not at all, 1 fully).
+	bool		bTube;
+	float		flRound;
+	float		flSideLight;
+
+	// The last point is the middle of a blob this big: over the last
+	// flTipLength the thing swells to it, and it ends round. 0 for none.
+	// Only with bTube.
+	float		flTipRadius;
+	float		flTipLength;
 };
 
 // pBend marks the points where it goes over an edge: the curve runs straight

@@ -40,6 +40,12 @@ BEGIN_SEND_TABLE_NOBASE( CHL2PlayerLocalData, DT_HL2Local )
 	SendPropFloat( SENDINFO(m_flTetherClimbSpeed) ),
 	SendPropFloat( SENDINFO(m_flTetherPump) ),
 	SendPropFloat( SENDINFO(m_flTetherMaxAngle) ),
+	SendPropBool( SENDINFO(m_bTetherAtWeapon) ),
+	SendPropBool( SENDINFO(m_bTetherMantling) ),
+	SendPropVector( SENDINFO(m_vecTetherMantleDest) ),
+	SendPropVector( SENDINFO(m_vecTetherMantleVia) ),
+	SendPropBool( SENDINFO(m_bTetherMantleVia) ),
+	SendPropVector( SENDINFO(m_vecTetherNextPoint) ),
 #endif
 END_SEND_TABLE()
 
@@ -65,6 +71,12 @@ BEGIN_SIMPLE_DATADESC( CHL2PlayerLocalData )
 	DEFINE_FIELD( m_flTetherClimbSpeed, FIELD_FLOAT ),
 	DEFINE_FIELD( m_flTetherPump, FIELD_FLOAT ),
 	DEFINE_FIELD( m_flTetherMaxAngle, FIELD_FLOAT ),
+	DEFINE_FIELD( m_bTetherAtWeapon, FIELD_BOOLEAN ),
+	DEFINE_FIELD( m_bTetherMantling, FIELD_BOOLEAN ),
+	DEFINE_FIELD( m_vecTetherMantleDest, FIELD_POSITION_VECTOR ),
+	DEFINE_FIELD( m_vecTetherMantleVia, FIELD_POSITION_VECTOR ),
+	DEFINE_FIELD( m_bTetherMantleVia, FIELD_BOOLEAN ),
+	DEFINE_FIELD( m_vecTetherNextPoint, FIELD_POSITION_VECTOR ),
 #endif
 	// Ladder related stuff
 	DEFINE_FIELD( m_hLadder, FIELD_EHANDLE ),
@@ -92,6 +104,12 @@ CHL2PlayerLocalData::CHL2PlayerLocalData()
 	m_flTetherClimbSpeed = 0.0f;
 	m_flTetherPump = 0.0f;
 	m_flTetherMaxAngle = 0.0f;
+	m_bTetherAtWeapon = false;
+	m_bTetherMantling = false;
+	m_vecTetherMantleDest.GetForModify().Init();
+	m_vecTetherMantleVia.GetForModify().Init();
+	m_bTetherMantleVia = false;
+	m_vecTetherNextPoint.GetForModify().Init();
 #endif
 }
 

@@ -37,6 +37,12 @@ BEGIN_RECV_TABLE_NOBASE( C_HL2PlayerLocalData, DT_HL2Local )
 	RecvPropFloat( RECVINFO(m_flTetherClimbSpeed) ),
 	RecvPropFloat( RECVINFO(m_flTetherPump) ),
 	RecvPropFloat( RECVINFO(m_flTetherMaxAngle) ),
+	RecvPropBool( RECVINFO(m_bTetherAtWeapon) ),
+	RecvPropBool( RECVINFO(m_bTetherMantling) ),
+	RecvPropVector( RECVINFO(m_vecTetherMantleDest) ),
+	RecvPropVector( RECVINFO(m_vecTetherMantleVia) ),
+	RecvPropBool( RECVINFO(m_bTetherMantleVia) ),
+	RecvPropVector( RECVINFO(m_vecTetherNextPoint) ),
 #endif
 END_RECV_TABLE()
 
@@ -51,6 +57,12 @@ BEGIN_PREDICTION_DATA_NO_BASE( C_HL2PlayerLocalData )
 	DEFINE_PRED_FIELD( m_flTetherClimbSpeed, FIELD_FLOAT, FTYPEDESC_INSENDTABLE ),
 	DEFINE_PRED_FIELD( m_flTetherPump, FIELD_FLOAT, FTYPEDESC_INSENDTABLE ),
 	DEFINE_PRED_FIELD( m_flTetherMaxAngle, FIELD_FLOAT, FTYPEDESC_INSENDTABLE ),
+	DEFINE_PRED_FIELD( m_bTetherAtWeapon, FIELD_BOOLEAN, FTYPEDESC_INSENDTABLE ),
+	DEFINE_PRED_FIELD( m_bTetherMantling, FIELD_BOOLEAN, FTYPEDESC_INSENDTABLE ),
+	DEFINE_PRED_FIELD( m_vecTetherMantleDest, FIELD_VECTOR, FTYPEDESC_INSENDTABLE ),
+	DEFINE_PRED_FIELD( m_vecTetherMantleVia, FIELD_VECTOR, FTYPEDESC_INSENDTABLE ),
+	DEFINE_PRED_FIELD( m_bTetherMantleVia, FIELD_BOOLEAN, FTYPEDESC_INSENDTABLE ),
+	DEFINE_PRED_FIELD( m_vecTetherNextPoint, FIELD_VECTOR, FTYPEDESC_INSENDTABLE ),
 #endif
 END_PREDICTION_DATA()
 
@@ -76,6 +88,12 @@ C_HL2PlayerLocalData::C_HL2PlayerLocalData()
 	m_flTetherClimbSpeed = 0.0f;
 	m_flTetherPump = 0.0f;
 	m_flTetherMaxAngle = 0.0f;
+	m_bTetherAtWeapon = false;
+	m_bTetherMantling = false;
+	m_vecTetherMantleDest = vec3_origin;
+	m_vecTetherMantleVia = vec3_origin;
+	m_bTetherMantleVia = false;
+	m_vecTetherNextPoint = vec3_origin;
 #endif
 }
 

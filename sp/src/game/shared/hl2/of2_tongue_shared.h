@@ -12,8 +12,13 @@
 #pragma once
 #endif
 
-// Points the tongue is drawn through: its beads, and the places between them
-// where it bends over an edge. Bends past this many are left out.
-#define OF2_TONGUE_MAX_NODES	64
+// Most points the loose part of the tongue is simulated as: from the last place
+// it bends over an edge (or the barnacle, if it doesn't) out to the tip. How
+// many there are at a time goes by its length.
+#define OF2_TONGUE_NODES		48
+
+// Places where the tongue bends over an edge, between the barnacle and the
+// loose part (the same as OF2_TETHER_MAX_PIVOTS)
+#define OF2_TONGUE_MAX_BENDS	16
 
 #endif // OF2_TONGUE_SHARED_H

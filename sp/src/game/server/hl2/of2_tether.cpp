@@ -107,6 +107,14 @@ const Vector &COF2Tether::GetNearestPoint( OF2TetherEnd_t end ) const
 	return ( end == TETHER_START ) ? GetPoint( 1 ) : GetPoint( GetPointCount() - 2 );
 }
 
+const Vector &COF2Tether::GetSwingNextPoint( void ) const
+{
+	if ( m_nPivots == 0 )
+		return GetSwingPoint();
+
+	return ( m_iPlayerEnd == TETHER_START ) ? GetPoint( 2 ) : GetPoint( GetPointCount() - 3 );
+}
+
 float COF2Tether::GetFixedLength( OF2TetherEnd_t end ) const
 {
 	const Vector &vecEnd = ( end == TETHER_START ) ? m_vecStart : m_vecEnd;
@@ -118,9 +126,10 @@ float COF2Tether::GetFreeLength( OF2TetherEnd_t end ) const
 	return MAX( m_flTotalLength - GetFixedLength( end ), 0.0f );
 }
 
-Vector COF2Tether::GetPlayerHandPos( CBasePlayer *pPlayer )
+Vector COF2Tether::GetPlayerHandPos( CBasePlayer *pPlayer, bool bAtWeapon )
 {
-	return pPlayer->GetAbsOrigin() + Vector( 0, 0, OF2_TetherHandHeight( pPlayer ) );
+	// The same point the client draws the tether to
+	return OF2_TetherHoldPos( pPlayer, bAtWeapon );
 }
 
 //-----------------------------------------------------------------------------

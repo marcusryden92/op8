@@ -36,6 +36,8 @@ COF2RopeSim::COF2RopeSim()
 	m_flSegment = OF2_ROPE_SIM_SPACING;
 	m_flDamping = ROPE_DAMPING;
 	m_flTimeLeft = 0.0f;
+	m_bEndPinned = false;
+	m_vecEndPin.Init();
 }
 
 int COF2RopeSim::NodesFor( float flLength )
@@ -109,6 +111,10 @@ void COF2RopeSim::Simulate( float flTime, const Vector &vecRoot, const Vector &v
 
 	// Between steps the root at least goes where it is held
 	m_vecPos[0] = vecRoot;
+	if ( m_bEndPinned )
+	{
+		m_vecPos[m_nNodes - 1] = m_vecEndPin;
+	}
 }
 
 void COF2RopeSim::Step( const Vector &vecRoot, const Vector &vecWind )
@@ -129,20 +135,41 @@ void COF2RopeSim::Step( const Vector &vecRoot, const Vector &vecWind )
 	m_vecPos[0] = vecRoot;
 	m_vecPrev[0] = vecRoot;
 
-	// Links that got too long are pulled back; the root doesn't move
+	// Held at the far end as well: it can't be shorter than the gap between the two
+	int iLast = m_nNodes - 1;
+	float flSegment = m_flSegment;
+	if ( m_bEndPinned )
+	{
+		m_vecPos[iLast] = m_vecEndPin;
+		m_vecPrev[iLast] = m_vecEndPin;
+		flSegment = MAX( flSegment, vecRoot.DistTo( m_vecEndPin ) / iLast );
+	}
+
+	// Links that got too long are pulled back; a held end doesn't move
 	for ( int k = 0; k < ROPE_ITERATIONS; k++ )
 	{
-		for ( int i = 0; i < m_nNodes - 1; i++ )
+		for ( int i = 0; i < iLast; i++ )
 		{
 			Vector vecLink = m_vecPos[i + 1] - m_vecPos[i];
 			float flLink = vecLink.Length();
-			if ( flLink <= m_flSegment || flLink < 0.001f )
+			if ( flLink <= flSegment || flLink < 0.001f )
 				continue;
 
-			Vector vecFix = vecLink * ( ( flLink - m_flSegment ) / flLink );
-			if ( i == 0 )
+			bool bNearHeld = ( i == 0 );
+			bool bFarHeld = ( m_bEndPinned && i + 1 == iLast );
+
+			Vector vecFix = vecLink * ( ( flLink - flSegment ) / flLink );
+			if ( bNearHeld && bFarHeld )
+			{
+				continue;
+			}
+			else if ( bNearHeld )
 			{
 				m_vecPos[i + 1] -= vecFix;
+			}
+			else if ( bFarHeld )
+			{
+				m_vecPos[i] += vecFix;
 			}
 			else
 			{
@@ -152,9 +179,32 @@ void COF2RopeSim::Step( const Vector &vecRoot, const Vector &vecWind )
 		}
 	}
 
+	// Between two held ends, a few passes over the links leave a long rope
+	// looking like rubber. This doesn't: no point is further from either end
+	// than the rope between the two is long.
+	if ( m_bEndPinned )
+	{
+		for ( int i = 1; i < iLast; i++ )
+		{
+			Vector vecOut = m_vecPos[i] - vecRoot;
+			float flOut = vecOut.Length();
+			if ( flOut > flSegment * i && flOut > 0.001f )
+			{
+				m_vecPos[i] = vecRoot + vecOut * ( flSegment * i / flOut );
+			}
+
+			vecOut = m_vecPos[i] - m_vecEndPin;
+			flOut = vecOut.Length();
+			if ( flOut > flSegment * ( iLast - i ) && flOut > 0.001f )
+			{
+				m_vecPos[i] = m_vecEndPin + vecOut * ( flSegment * ( iLast - i ) / flOut );
+			}
+		}
+	}
+
 	// A point that moved into the world stops where it touched it, and drags
 	CTraceFilterWorldAndPropsOnly filter;
-	for ( int i = 1; i < m_nNodes; i++ )
+	for ( int i = 1; i < ( m_bEndPinned ? iLast : m_nNodes ); i++ )
 	{
 		trace_t tr;
 		UTIL_TraceLine( vecStart[i], m_vecPos[i], MASK_SOLID_BRUSHONLY, &filter, &tr );

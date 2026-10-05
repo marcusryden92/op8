@@ -54,6 +54,12 @@ public:
 	float	m_flTetherClimbSpeed;
 	float	m_flTetherPump;
 	float	m_flTetherMaxAngle;
+	bool	m_bTetherAtWeapon;
+	bool	m_bTetherMantling;
+	Vector	m_vecTetherMantleDest;
+	Vector	m_vecTetherMantleVia;
+	bool	m_bTetherMantleVia;
+	Vector	m_vecTetherNextPoint;
 #endif
 
 	// Ladder related data

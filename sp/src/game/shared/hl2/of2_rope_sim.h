@@ -39,6 +39,11 @@ public:
 	// The rope paid out or taken in at the root; the points stay where they are
 	void	SetLength( float flLength );
 
+	// Holds the far end as well, there: the rope then hangs between the two
+	// ends, as slack as its length leaves it. ClearEndPin lets it go again.
+	void	SetEndPin( const Vector &vecEnd )	{ m_bEndPinned = true; m_vecEndPin = vecEnd; }
+	void	ClearEndPin( void )					{ m_bEndPinned = false; }
+
 	// Moves it on by flTime, its root at vecRoot. vecWind pushes every point.
 	void	Simulate( float flTime, const Vector &vecRoot, const Vector &vecWind );
 
@@ -60,6 +65,8 @@ private:
 	float	m_flSegment;
 	float	m_flDamping;
 	float	m_flTimeLeft;
+	bool	m_bEndPinned;
+	Vector	m_vecEndPin;
 };
 
 #endif // OF2_ROPE_SIM_H
