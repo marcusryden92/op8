@@ -13,6 +13,8 @@
 #include "cbase.h"
 #include "hl2/of2_tongue_shared.h"
 #include "of2_curve.h"
+#include "engine/ivmodelrender.h"
+#include "materialsystem/imaterialvar.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -24,13 +26,17 @@
 #define TONGUE_RENDER_RADIUS	2048.0f
 
 ConVar of2_tongue_smooth( "of2_tongue_smooth", "3", FCVAR_NONE, "How many pieces the Barnacle's tongue is drawn in between two of its points. 1 draws straight lines." );
-ConVar of2_tongue_shine( "of2_tongue_shine", "0.35", FCVAR_NONE, "Strength of the wet highlight along the Barnacle's tongue. 0 turns it off." );
-ConVar of2_tongue_shine_width( "of2_tongue_shine_width", "0.5", FCVAR_NONE, "Width of the highlight along the Barnacle's tongue, as a share of the tongue's." );
+ConVar of2_tongue_shine( "of2_tongue_shine", "1.4", FCVAR_NONE, "Strength of the wet highlight along the Barnacle's tongue, as a multiple of the light where it is: over 1 it burns out to white in good light. 0 turns it off." );
+ConVar of2_tongue_shine_width( "of2_tongue_shine_width", "0.45", FCVAR_NONE, "Width of the highlight along the Barnacle's tongue, as a share of the tongue's." );
+ConVar of2_tongue_shine_follow( "of2_tongue_shine_follow", "1", FCVAR_NONE, "How far the highlight on the Barnacle's tongue moves towards the side the light comes from. 0 keeps it down the middle." );
 ConVar of2_tongue_min_light( "of2_tongue_min_light", "0.25", FCVAR_NONE, "The Barnacle's tongue and the climb ropes take on the light where they are, but never get darker than this." );
 ConVar of2_tongue_round( "of2_tongue_round", "0.55", FCVAR_NONE, "How much darker the Barnacle's tongue and the climb ropes get towards their edges, so they read as round. 0 is flat, 1 goes to black." );
 ConVar of2_tongue_side_light( "of2_tongue_side_light", "1", FCVAR_NONE, "How much each side of the Barnacle's tongue and of the climb ropes follows the light falling on it from that side: bright towards a lamp or the sky, dark away from it. 0 is the same all round." );
 ConVar of2_tongue_blob_radius( "of2_tongue_blob_radius", "1.4", FCVAR_NONE, "How thick the Barnacle's tongue gets at its tip, from its middle to its edge (the rest of the tongue is 1). It ends round at that size. 1 is no thickening, 0 a cut-off end." );
 ConVar of2_tongue_blob_length( "of2_tongue_blob_length", "20", FCVAR_NONE, "Over how much of its end the Barnacle's tongue thickens towards its tip." );
+ConVar of2_tongue_blob_shade( "of2_tongue_blob_shade", "1", FCVAR_NONE, "How bright the round end of the Barnacle's tongue is next to the rest of it. Under 1 is darker." );
+ConVar of2_tongue_reflect( "of2_tongue_reflect", "0.5", FCVAR_NONE, "How strongly the Barnacle's tongue mirrors its surroundings (the map's cubemaps). 0 turns it off." );
+ConVar of2_tongue_bend_radius( "of2_tongue_bend_radius", "12", FCVAR_NONE, "Where the Barnacle's tongue or a climb rope goes over an edge it is drawn going round it, starting and ending this far either side. 0 turns on the spot." );
 
 // hl_gamemovement.cpp
 Vector OF2_TetherHoldPos( CBasePlayer *pPlayer, bool bAtWeapon );
@@ -159,12 +165,28 @@ int C_OF2Tongue::DrawModel( int flags )
 	style.nSmooth = of2_tongue_smooth.GetInt();
 	style.flShine = of2_tongue_shine.GetFloat();
 	style.flShineWidth = of2_tongue_shine_width.GetFloat();
+	style.flShineFollow = of2_tongue_shine_follow.GetFloat();
 	style.flMinLight = of2_tongue_min_light.GetFloat();
 	style.bTube = true;
 	style.flRound = of2_tongue_round.GetFloat();
 	style.flSideLight = of2_tongue_side_light.GetFloat();
 	style.flTipRadius = of2_tongue_blob_radius.GetFloat();
 	style.flTipLength = of2_tongue_blob_length.GetFloat();
+	style.flBendRadius = of2_tongue_bend_radius.GetFloat();
+	style.flTipShade = of2_tongue_blob_shade.GetFloat();
+
+	// The material mirrors the map's cubemap ($envmap env_cubemap). Which one
+	// is the engine's to say, as it does for a model: the one nearest the
+	// middle of the tongue.
+	modelrender->SetupLighting( vecPoints[nPoints / 2] );
+
+	bool bFound = false;
+	IMaterialVar *pReflect = m_Material->FindVar( "$envmaptint", &bFound, false );
+	if ( bFound && pReflect )
+	{
+		float flReflect = MAX( of2_tongue_reflect.GetFloat(), 0.0f );
+		pReflect->SetVecValue( flReflect, flReflect, flReflect );
+	}
 
 	OF2_DrawCurve( vecPoints, bBend, nPoints, style );
 	return 1;

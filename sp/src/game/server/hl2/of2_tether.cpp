@@ -38,6 +38,7 @@
 ConVar of2_tether_pivot_offset( "of2_tether_pivot_offset", "1.5", FCVAR_NONE, "How far off the corner a tether's pivot is put." );
 ConVar of2_tether_pivot_mindist( "of2_tether_pivot_mindist", "8", FCVAR_NONE, "A tether gets no new pivot closer than this to the one before it." );
 ConVar of2_tether_unwrap_angle( "of2_tether_unwrap_angle", "12", FCVAR_NONE, "A tether's pivot can go once the line bends less than this many degrees at it (and the way past it is clear)." );
+ConVar of2_tether_unwrap_clear( "of2_tether_unwrap_clear", "6", FCVAR_NONE, "A tether's pivot also goes, however much the line bends at it, once the straight line past it is clear and misses the pivot by this much." );
 ConVar of2_tether_wrap_props( "of2_tether_wrap_props", "1", FCVAR_NONE, "Tethers wrap around static props as well as world brushes." );
 
 BEGIN_SIMPLE_DATADESC( COF2Tether )
@@ -297,10 +298,10 @@ bool COF2Tether::FindPivot( const Vector &vecFixed, const Vector &vecMoving, con
 
 //-----------------------------------------------------------------------------
 // The pivot next to this end goes when the way past it is clear and the line
-// either runs nearly straight through it or pulls it away from its corner.
-// Checking the bend as well as the trace keeps a pivot from going while the
-// line still visibly turns there (it would jump), and from coming back the
-// next tick.
+// either runs nearly straight through it, pulls it away from its corner, or
+// would miss it by a good way (of2_tether_unwrap_clear). Checking more than
+// the trace keeps a pivot from going while the line only just grazes past its
+// corner, and from coming back the next tick.
 //-----------------------------------------------------------------------------
 bool COF2Tether::UnwrapEnd( OF2TetherEnd_t end )
 {
@@ -324,12 +325,26 @@ bool COF2Tether::UnwrapEnd( OF2TetherEnd_t end )
 	// Both sides pull on the pivot; wrapped, that presses it into the corner
 	bool bLifted = DotProduct( vecToPrev + vecToNext, m_vecPivotOut[iPivot] ) > 0.05f;
 
-	if ( !bStraight && !bLifted )
-		return false;
-
 	trace_t tr;
 	if ( IsBlocked( vecPrev, vecNext, &tr ) )
 		return false;
+
+	if ( !bStraight && !bLifted )
+	{
+		// Neither, yet the way past is clear: the line has left the corner some
+		// other way. A pivot doesn't slide along its edge, and an end can come
+		// up past the edge and over what it belongs to (a player pulled up onto
+		// a ledge and walking on: the line would run back to the lip and out
+		// again). It goes if the straight line passes well clear of it, checked
+		// from both sides so that an end inside something doesn't count.
+		float flClear = CalcDistanceToLineSegment( vecPivot, vecPrev, vecNext );
+		if ( tr.startsolid || flClear < of2_tether_unwrap_clear.GetFloat() )
+			return false;
+
+		trace_t trBack;
+		if ( IsBlocked( vecNext, vecPrev, &trBack ) || trBack.startsolid )
+			return false;
+	}
 
 	RemovePivot( iPivot );
 	return true;

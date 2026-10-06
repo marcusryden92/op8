@@ -41,7 +41,11 @@ public:
 
 	// Holds the far end as well, there: the rope then hangs between the two
 	// ends, as slack as its length leaves it. ClearEndPin lets it go again.
-	void	SetEndPin( const Vector &vecEnd )	{ m_bEndPinned = true; m_vecEndPin = vecEnd; }
+	// When that end moves, the points between go with it, each by its share
+	// (none at the root, all of the way at the end), before anything else is
+	// worked out: a rope drawn taut stays taut and follows at once, instead of
+	// being dragged after the end a step at a time.
+	void	SetEndPin( const Vector &vecEnd )	{ if ( !m_bEndPinned ) m_vecEndPinWas = vecEnd; m_bEndPinned = true; m_vecEndPin = vecEnd; }
 	void	ClearEndPin( void )					{ m_bEndPinned = false; }
 
 	// Moves it on by flTime, its root at vecRoot. vecWind pushes every point.
@@ -67,6 +71,8 @@ private:
 	float	m_flTimeLeft;
 	bool	m_bEndPinned;
 	Vector	m_vecEndPin;
+	Vector	m_vecEndPinWas;
+	Vector	m_vecRootWas;
 };
 
 #endif // OF2_ROPE_SIM_H

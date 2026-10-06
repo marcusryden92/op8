@@ -38,6 +38,8 @@ COF2RopeSim::COF2RopeSim()
 	m_flTimeLeft = 0.0f;
 	m_bEndPinned = false;
 	m_vecEndPin.Init();
+	m_vecEndPinWas.Init();
+	m_vecRootWas.Init();
 }
 
 int COF2RopeSim::NodesFor( float flLength )
@@ -53,6 +55,10 @@ void COF2RopeSim::Seed( const Vector *pPath, int nPath, float flLength, const Ve
 	m_nNodes = NodesFor( flLength );
 	m_flSegment = MAX( flLength, 1.0f ) / ( m_nNodes - 1 );
 	m_flTimeLeft = 0.0f;
+
+	// Laid out anew, it is held only at its root until told otherwise
+	m_bEndPinned = false;
+	m_vecRootWas = pPath[0];
 
 	// Walk the path, a point every m_flSegment
 	int iLeg = 0;
@@ -101,6 +107,25 @@ void COF2RopeSim::Simulate( float flTime, const Vector &vecRoot, const Vector &v
 {
 	if ( m_nNodes < 2 )
 		return;
+
+	if ( m_bEndPinned )
+	{
+		// Held at both ends: where the ends have gone, the rope between goes
+		// too, each point by its share of each end's move. (Where it was a
+		// step ago goes along, so this is not speed.)
+		Vector vecRootMoved = vecRoot - m_vecRootWas;
+		Vector vecEndMoved = m_vecEndPin - m_vecEndPinWas;
+		for ( int i = 1; i < m_nNodes - 1; i++ )
+		{
+			float flShare = (float)i / ( m_nNodes - 1 );
+			Vector vecMoved = vecRootMoved * ( 1.0f - flShare ) + vecEndMoved * flShare;
+			m_vecPos[i] += vecMoved;
+			m_vecPrev[i] += vecMoved;
+		}
+
+		m_vecEndPinWas = m_vecEndPin;
+	}
+	m_vecRootWas = vecRoot;
 
 	m_flTimeLeft = MIN( m_flTimeLeft + flTime, ROPE_STEP * ROPE_MAX_STEPS );
 	while ( m_flTimeLeft >= ROPE_STEP )

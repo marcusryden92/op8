@@ -26,12 +26,15 @@ struct OF2CurveStyle_t
 		nSmooth = 4;
 		flShine = 0.0f;
 		flShineWidth = 0.5f;
+		flShineFollow = 0.0f;
 		flMinLight = 0.25f;
 		bTube = false;
 		flRound = 0.5f;
 		flSideLight = 1.0f;
 		flTipRadius = 0.0f;
 		flTipLength = 0.0f;
+		flTipShade = 1.0f;
+		flBendRadius = 0.0f;
 	}
 
 	IMaterial	*pMaterial;
@@ -48,6 +51,9 @@ struct OF2CurveStyle_t
 
 	float		flShine;
 	float		flShineWidth;		// share of flWidth
+	// The highlight sits towards the side the light comes from (1), or always
+	// down the middle (0). Only with bTube.
+	float		flShineFollow;
 	float		flMinLight;			// it never gets darker than this
 
 	// Shaded across its width as the round thing it is, instead of flat:
@@ -63,6 +69,12 @@ struct OF2CurveStyle_t
 	// Only with bTube.
 	float		flTipRadius;
 	float		flTipLength;
+	// The round ending is this much darker (under 1) or brighter than the rest
+	float		flTipShade;
+
+	// Where it goes over an edge (pBend) it is drawn going round, starting and
+	// ending this far either side of the point. 0 turns on the spot.
+	float		flBendRadius;
 };
 
 // pBend marks the points where it goes over an edge: the curve runs straight

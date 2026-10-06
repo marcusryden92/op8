@@ -37,12 +37,13 @@
 
 ConVar of2_climbrope_smooth( "of2_climbrope_smooth", "3", FCVAR_NONE, "How many pieces a climb rope is drawn in between two of its points. 1 draws straight lines." );
 ConVar of2_climbrope_texture_scale( "of2_climbrope_texture_scale", "1", FCVAR_NONE, "How long one copy of a climb rope's texture is, as a multiple of 50 units." );
-ConVar of2_climbrope_slack( "of2_climbrope_slack", "0.01", FCVAR_NONE, "How much longer than the straight line the rope above a hanging player is drawn, as a share. More bows and trails more in a swing; 0 is a straight line." );
+ConVar of2_climbrope_slack( "of2_climbrope_slack", "0.001", FCVAR_NONE, "How much longer than the straight line the rope above a hanging player is drawn, as a share. More bows and trails more in a swing; 0 is a straight line." );
 
 // c_of2_tongue.cpp
 extern ConVar of2_tongue_min_light;
 extern ConVar of2_tongue_round;
 extern ConVar of2_tongue_side_light;
+extern ConVar of2_tongue_bend_radius;
 
 // hl_gamemovement.cpp
 Vector OF2_TetherHoldPos( CBasePlayer *pPlayer, bool bAtWeapon );
@@ -322,6 +323,7 @@ int C_OF2ClimbRope::DrawModel( int flags )
 	style.flSideLight = of2_tongue_side_light.GetFloat();
 	style.flTipRadius = m_flWidth * 0.5f;
 	style.flTipLength = 8.0f;
+	style.flBendRadius = of2_tongue_bend_radius.GetFloat();
 
 	OF2_DrawCurve( vecPoints, bBend, nPoints, style );
 	return 1;

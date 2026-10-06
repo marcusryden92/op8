@@ -23,14 +23,25 @@
 #include "tier0/memdbgon.h"
 
 #define CURVE_MAX_SMOOTH	8
+// A texture stretched once over the whole length stops this short of its ends
+#define CURVE_TEXTURE_INSET	0.03f
+// A bend over an edge is drawn as a curve of this many pieces
+#define CURVE_BEND_PIECES	8
 // The stretch up to a blob is cut finer, up to this many pieces
 #define CURVE_TIP_PIECES	24
 #define CURVE_MAX_SEGS		( ( OF2_CURVE_MAX_POINTS - 1 ) * CURVE_MAX_SMOOTH + CURVE_TIP_PIECES + 1 )
 
-// A tube has this many points across. These are how far each is from the
-// middle towards the edge.
-#define TUBE_COLUMNS		5
-static const float s_flTubeAcross[TUBE_COLUMNS] = { -1.0f, -0.7f, 0.0f, 0.7f, 1.0f };
+// A tube has this many points across: its edges, one just inside each, and
+// five for the highlight: its middle, where it ends either side, and one each
+// side between, so that it is a hot line with a soft glow around it
+#define TUBE_COLUMNS		9
+#define TUBE_MIDDLE			4
+// How far out the points just inside the edges are
+#define TUBE_SHOULDER		0.85f
+// Where the highlight's in-between points are, as a share of its half-width,
+// and how bright it is there, as a share of its middle
+#define TUBE_SHINE_CORE		0.3f
+#define TUBE_SHINE_GLOW		0.3f
 
 // The disc of a round ending: how many sides it has, and how far behind its
 // own middle it is put so the strip is drawn over it where they meet
@@ -110,6 +121,7 @@ static void DrawDisc( IMaterial *pMaterial, const Vector &vecCenter, float flRad
 	// The middle, then a ring part of the way out, then the rim
 	Vector vecPos[2][BLOB_DISC_SIDES];
 	Vector vecShade[2][BLOB_DISC_SIDES];
+	Vector vecFace[2][BLOB_DISC_SIDES];
 	float flAcross[2][BLOB_DISC_SIDES];
 	static const float flOut[2] = { BLOB_DISC_RING, 1.0f };
 
@@ -123,12 +135,13 @@ static void DrawDisc( IMaterial *pMaterial, const Vector &vecCenter, float flRad
 			Vector vecSpoke = vecSide * flCos + vecUp * sin( flAngle );
 
 			vecPos[r][i] = vecMiddle + vecSpoke * ( flRadius * flOut[r] );
-			vecShade[r][i] = ShadeTube( vecColor, pBox, vecView * flFacing + vecSpoke * flOut[r], flOut[r], style );
+			vecFace[r][i] = vecView * flFacing + vecSpoke * flOut[r];
+			vecShade[r][i] = ShadeTube( vecColor, pBox, vecFace[r][i], flOut[r], style ) * style.flTipShade;
 			flAcross[r][i] = 0.5f + 0.5f * flOut[r] * flCos;
 		}
 	}
 
-	Vector vecMiddleShade = ShadeTube( vecColor, pBox, vecView, 0.0f, style );
+	Vector vecMiddleShade = ShadeTube( vecColor, pBox, vecView, 0.0f, style ) * style.flTipShade;
 
 	CMatRenderContextPtr pRenderContext( materials );
 	IMesh *pMesh = pRenderContext->GetDynamicMesh( true, NULL, NULL, pMaterial );
@@ -142,16 +155,19 @@ static void DrawDisc( IMaterial *pMaterial, const Vector &vecCenter, float flRad
 
 		// Middle to the ring
 		meshBuilder.Position3fv( vecMiddle.Base() );
+		meshBuilder.Normal3fv( vecView.Base() );
 		meshBuilder.Color4f( vecMiddleShade.x, vecMiddleShade.y, vecMiddleShade.z, 1.0f );
 		meshBuilder.TexCoord2f( 0, 0.5f, flTexCoord );
 		meshBuilder.AdvanceVertex();
 
 		meshBuilder.Position3fv( vecPos[0][i].Base() );
+		meshBuilder.Normal3fv( vecFace[0][i].Base() );
 		meshBuilder.Color4f( vecShade[0][i].x, vecShade[0][i].y, vecShade[0][i].z, 1.0f );
 		meshBuilder.TexCoord2f( 0, flAcross[0][i], flTexCoord );
 		meshBuilder.AdvanceVertex();
 
 		meshBuilder.Position3fv( vecPos[0][j].Base() );
+		meshBuilder.Normal3fv( vecFace[0][j].Base() );
 		meshBuilder.Color4f( vecShade[0][j].x, vecShade[0][j].y, vecShade[0][j].z, 1.0f );
 		meshBuilder.TexCoord2f( 0, flAcross[0][j], flTexCoord );
 		meshBuilder.AdvanceVertex();
@@ -164,6 +180,7 @@ static void DrawDisc( IMaterial *pMaterial, const Vector &vecCenter, float flRad
 			int s = iCorner[k][1] ? j : i;
 
 			meshBuilder.Position3fv( vecPos[r][s].Base() );
+			meshBuilder.Normal3fv( vecFace[r][s].Base() );
 			meshBuilder.Color4f( vecShade[r][s].x, vecShade[r][s].y, vecShade[r][s].z, 1.0f );
 			meshBuilder.TexCoord2f( 0, flAcross[r][s], flTexCoord );
 			meshBuilder.AdvanceVertex();
@@ -185,8 +202,16 @@ static void DrawTube( IMaterial *pMaterial, const Vector *pPos, const Vector *pC
 	static Vector s_vecShade[CURVE_MAX_SEGS][TUBE_COLUMNS];
 	static Vector s_vecSide[CURVE_MAX_SEGS];
 	static Vector s_vecView[CURVE_MAX_SEGS];
+	static float s_flAcross[CURVE_MAX_SEGS][TUBE_COLUMNS];
+	// (the way each point faces: what a material with an $envmap mirrors by)
+	static Vector s_vecNormal[CURVE_MAX_SEGS][TUBE_COLUMNS];
 
 	const Vector &vecEye = CurrentViewOrigin();
+
+	// The highlight's half-width, and how far off the middle of the strip it can
+	// go and still fit
+	float flShineEdge = clamp( style.flShineWidth, 0.1f, 0.6f );
+	float flShineLimit = TUBE_SHOULDER - 0.05f - flShineEdge;
 
 	Vector vecLastDir( 1, 0, 0 );
 	Vector vecLastSide( 0, 0, 1 );
@@ -220,12 +245,41 @@ static void DrawTube( IMaterial *pMaterial, const Vector *pPos, const Vector *pC
 			vecFront = vecView;
 		}
 
+		// Something wet shines where it mirrors the light, not where it faces
+		// the eye: the highlight sits on the side the light comes from. That is
+		// found from how much brighter the place is from one side than from the
+		// others; lit evenly, it stays in the middle.
+		float flPeak = 0.0f;
+		if ( style.flShineFollow > 0.0f )
+		{
+			const float *pSides = pBox[i];
+			Vector vecLight( pSides[0] - pSides[1], pSides[2] - pSides[3], pSides[4] - pSides[5] );
+			float flAll = ( pSides[0] + pSides[1] + pSides[2] + pSides[3] + pSides[4] + pSides[5] ) / 6.0f;
+			float flOneSided = VectorNormalize( vecLight );
+			if ( flAll > 0.0001f && flOneSided > 0.0001f )
+			{
+				float flPull = MIN( flOneSided / ( flAll * 3.0f ), 1.0f ) * MIN( style.flShineFollow, 1.0f );
+				Vector vecHalf = vecView + vecLight * flPull;
+				float flSideways = DotProduct( vecHalf, vecSide );
+				float flFacing = MAX( DotProduct( vecHalf, vecFront ), 0.01f );
+				flPeak = flSideways / sqrt( flSideways * flSideways + flFacing * flFacing );
+			}
+		}
+		flPeak = clamp( flPeak, -flShineLimit, flShineLimit );
+
+		// How far each point across is from the middle towards the edge
+		const float flTubeAcross[TUBE_COLUMNS] = { -1.0f, -TUBE_SHOULDER,
+			flPeak - flShineEdge, flPeak - flShineEdge * TUBE_SHINE_CORE, flPeak, flPeak + flShineEdge * TUBE_SHINE_CORE, flPeak + flShineEdge,
+			TUBE_SHOULDER, 1.0f };
+
 		for ( int c = 0; c < TUBE_COLUMNS; c++ )
 		{
-			float flAcross = s_flTubeAcross[c];
+			float flAcross = flTubeAcross[c];
+			s_flAcross[i][c] = flAcross;
 			Vector vecNormal = vecFront * sqrt( 1.0f - flAcross * flAcross ) + vecSide * flAcross;
 
 			s_vecPos[i][c] = pPos[i] + vecSide * ( flAcross * pRadius[i] );
+			s_vecNormal[i][c] = vecNormal;
 			s_vecShade[i][c] = ShadeTube( pColor[i], pBox[i], vecNormal, fabs( flAcross ), style );
 		}
 
@@ -252,8 +306,48 @@ static void DrawTube( IMaterial *pMaterial, const Vector *pPos, const Vector *pC
 					const Vector &vecShade = s_vecShade[iAlong][iAcross];
 
 					meshBuilder.Position3fv( s_vecPos[iAlong][iAcross].Base() );
+					meshBuilder.Normal3fv( s_vecNormal[iAlong][iAcross].Base() );
 					meshBuilder.Color4f( vecShade.x, vecShade.y, vecShade.z, 1.0f );
-					meshBuilder.TexCoord2f( 0, 0.5f + 0.5f * s_flTubeAcross[iAcross], pTexCoord[iAlong] );
+					meshBuilder.TexCoord2f( 0, 0.5f + 0.5f * s_flAcross[iAlong][iAcross], pTexCoord[iAlong] );
+					meshBuilder.AdvanceVertex();
+				}
+			}
+		}
+
+		meshBuilder.End();
+		pMesh->Draw();
+	}
+
+	// A bright streak reads as a wet, round surface. It is added on over the
+	// four middle strips of the very same points as the tube under it: a hot
+	// line, a glow either side of it, nothing where those strips end. It may
+	// be asked for brighter than the light there, and then burns out to white.
+	// (As a strip of its own, with points of its own, it lay a hair in front
+	// of the tube in some places and behind it in others, and flickered.)
+	if ( style.pShineMaterial && style.flShine > 0.0f )
+	{
+		CMatRenderContextPtr pRenderContext( materials );
+		IMesh *pMesh = pRenderContext->GetDynamicMesh( true, NULL, NULL, style.pShineMaterial );
+
+		CMeshBuilder meshBuilder;
+		meshBuilder.Begin( pMesh, MATERIAL_QUADS, ( nCount - 1 ) * 4 );
+
+		static const int iCorner[4][2] = { { 0, 0 }, { 0, 1 }, { 1, 1 }, { 1, 0 } };
+		for ( int i = 0; i < nCount - 1; i++ )
+		{
+			for ( int c = TUBE_MIDDLE - 2; c <= TUBE_MIDDLE + 1; c++ )
+			{
+				for ( int k = 0; k < 4; k++ )
+				{
+					int iAlong = i + iCorner[k][0];
+					int iAcross = c + iCorner[k][1];
+					int nOff = abs( iAcross - TUBE_MIDDLE );
+					float flBright = ( nOff == 0 ) ? style.flShine : ( ( nOff == 1 ) ? style.flShine * TUBE_SHINE_GLOW : 0.0f );
+					const Vector &vecLight = pColor[iAlong];
+
+					meshBuilder.Position3fv( s_vecPos[iAlong][iAcross].Base() );
+					meshBuilder.Color4f( MIN( vecLight.x * flBright, 1.0f ), MIN( vecLight.y * flBright, 1.0f ), MIN( vecLight.z * flBright, 1.0f ), 1.0f );
+					meshBuilder.TexCoord2f( 0, 0.5f, 0.5f );
 					meshBuilder.AdvanceVertex();
 				}
 			}
@@ -275,6 +369,63 @@ void OF2_DrawCurve( const Vector *pPoints, const bool *pBend, int nPoints, const
 	nPoints = MIN( nPoints, OF2_CURVE_MAX_POINTS );
 	if ( nPoints < 2 || style.pMaterial == NULL )
 		return;
+
+	// Where it goes over an edge it doesn't turn on the spot: it goes round.
+	// Each such point is swapped for a short curve that leaves the straight
+	// run coming in, passes through the point itself, and joins the straight
+	// run going out, both without a kink. Through the point, not inside it:
+	// the point stands just clear of the edge, and a curve that cut the corner
+	// would dip into what the edge belongs to. This one swings wide instead.
+	Vector vecRounded[OF2_CURVE_MAX_POINTS];
+	bool bRounded[OF2_CURVE_MAX_POINTS];
+	if ( pBend && style.flBendRadius > 0.0f )
+	{
+		int nOut = 0;
+		for ( int i = 0; i < nPoints; i++ )
+		{
+			// (as long as there is room left for it and for the points still to come)
+			bool bRoom = nOut + CURVE_BEND_PIECES + 1 + ( nPoints - 1 - i ) <= OF2_CURVE_MAX_POINTS;
+			float flReach = 0.0f;
+			Vector vecIn, vecOut;
+			if ( pBend[i] && i > 0 && i < nPoints - 1 && bRoom )
+			{
+				vecIn = pPoints[i] - pPoints[i - 1];
+				vecOut = pPoints[i + 1] - pPoints[i];
+				float flIn = VectorNormalize( vecIn );
+				float flOut = VectorNormalize( vecOut );
+
+				// Less than half of either run, so two bends can share one
+				flReach = MIN( style.flBendRadius, MIN( flIn, flOut ) * 0.45f );
+			}
+
+			if ( flReach < 0.5f )
+			{
+				vecRounded[nOut] = pPoints[i];
+				bRounded[nOut] = pBend[i];
+				nOut++;
+				continue;
+			}
+
+			Vector vecFrom = pPoints[i] - vecIn * flReach;
+			Vector vecTo = pPoints[i] + vecOut * flReach;
+			Vector vecPull1 = pPoints[i] + vecIn * ( flReach / 3.0f );
+			Vector vecPull2 = pPoints[i] - vecOut * ( flReach / 3.0f );
+
+			for ( int k = 0; k <= CURVE_BEND_PIECES; k++ )
+			{
+				float t = (float)k / CURVE_BEND_PIECES;
+				float s = 1.0f - t;
+
+				vecRounded[nOut] = vecFrom * ( s * s * s ) + vecPull1 * ( 3.0f * s * s * t ) + vecPull2 * ( 3.0f * s * t * t ) + vecTo * ( t * t * t );
+				bRounded[nOut] = true;
+				nOut++;
+			}
+		}
+
+		pPoints = vecRounded;
+		pBend = bRounded;
+		nPoints = nOut;
+	}
 
 	// The materials are unlit, so the light at each point is put into the color.
 	// For a tube, also how bright it is from each side.
@@ -368,6 +519,14 @@ void OF2_DrawCurve( const Vector *pPoints, const bool *pBend, int nPoints, const
 	for ( int i = 0; i < nCount; i++ )
 	{
 		flTexCoord[i] = flAlong[i] * flScale;
+
+		// One copy over the whole length: kept off the texture's two ends. Right
+		// at them it is drawn mixed with the other end (the texture repeats),
+		// which left the round ending paler than the tongue it ends.
+		if ( style.flTextureRepeat <= 0.0f )
+		{
+			flTexCoord[i] = CURVE_TEXTURE_INSET + flTexCoord[i] * ( 1.0f - 2.0f * CURVE_TEXTURE_INSET );
+		}
 	}
 
 	// Half its width everywhere, but for the blob: over the last stretch it
@@ -399,8 +558,8 @@ void OF2_DrawCurve( const Vector *pPoints, const bool *pBend, int nPoints, const
 		DrawRibbon( style.pMaterial, vecPos, vecColor, flTexCoord, flRadius, nCount, 1.0f, 1.0f );
 	}
 
-	// A narrow bright streak down the middle reads as a wet, round surface
-	if ( style.pShineMaterial && style.flShine > 0.0f )
+	// (a tube has put its highlight on itself)
+	if ( !style.bTube && style.pShineMaterial && style.flShine > 0.0f )
 	{
 		DrawRibbon( style.pShineMaterial, vecPos, vecColor, flTexCoord, flRadius, nCount, style.flShineWidth, style.flShine );
 	}

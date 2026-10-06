@@ -69,9 +69,6 @@
 // Share of its speed along a surface a point of the tongue loses on touching it
 #define BARNACLE_ROPE_FRICTION		0.4f
 
-// A new bend this close to the old run of points is taken to lie on it
-#define BARNACLE_REBASE_DIST		24.0f
-
 // A tip that came off something doesn't stick again for this long, and something
 // the tongue let go of isn't picked up again for this long
 #define BARNACLE_RESTICK_TIME		0.75f
@@ -92,6 +89,10 @@
 // A player moved up onto an edge, or standing by where the tongue is fixed,
 // gets this much more tongue than it takes to reach
 #define BARNACLE_MANTLE_SLACK		4.0f
+
+// Reeled all the way in on the ground, the player counts as there within this
+// much of the shortest the tongue goes
+#define BARNACLE_RELEASE_DIST		16.0f
 
 // Something on the length of the tongue is held this close to its place on it,
 // and pulled back there this hard (speed per unit away, and the most speed)
@@ -129,7 +130,9 @@ ConVar of2_barnacle_snag_dist( "of2_barnacle_snag_dist", "32", FCVAR_NONE, "Some
 ConVar of2_barnacle_snag_time( "of2_barnacle_snag_time", "0.5", FCVAR_NONE, "Something that has been slipping off the Barnacle's tongue for this long is let go." );
 ConVar of2_barnacle_sag( "of2_barnacle_sag", "0.1", FCVAR_NONE, "How much the weight of what the Barnacle's tongue carries pulls the tongue down there (per unit of mass)." );
 ConVar of2_barnacle_spacing( "of2_barnacle_spacing", "20", FCVAR_NONE, "The loose part of the Barnacle's tongue is simulated as a point about every this much of its length (up to 48 points), so it is as stiff and hangs the same way whether it is short or long. Smaller is suppler." );
+ConVar of2_barnacle_settle_speed( "of2_barnacle_settle_speed", "300", FCVAR_NONE, "The Barnacle's tongue is thrown out along the arc its tip flies, which is longer than the straight line to where the tip ends up. Once the throw is over that slack is taken up at this speed." );
 ConVar of2_barnacle_drape( "of2_barnacle_drape", "1", FCVAR_NONE, "The length of the Barnacle's tongue lies on and drapes over loose physics objects, as it does over the world. 0: only over the world." );
+ConVar of2_barnacle_auto_release( "of2_barnacle_auto_release", "1", FCVAR_NONE, "The Barnacle takes its tongue back by itself once the player stands on the ground and has reeled in all there is to reel." );
 ConVar of2_barnacle_debug( "of2_barnacle_debug", "0", FCVAR_NONE, "Draw the Barnacle's tongue as debug overlays: its line and bends, its points, and what it holds." );
 
 static const char *s_pTongueContext = "BarnacleTongueThink";
@@ -235,9 +238,9 @@ public:
 	// All of it at one point, the tip leaving at vecTipVelocity
 	void	Seed( const Vector &vecStart, const Vector &vecTipVelocity );
 
-	// The start has jumped to a new bend, or back to the one before: the points
-	// are laid out again along the way the tongue lies now
-	void	Rebase( const Vector &vecStart );
+	// The start has jumped to a new bend (bNewBend), or back to the one before:
+	// the points are laid out again along the way the tongue lies now
+	void	Rebase( const Vector &vecStart, bool bNewBend );
 
 	// One tick. flLength is how much tongue there is from the start to the tip.
 	// pTipPin is where the tip is held, or NULL if it is free.
@@ -251,6 +254,8 @@ public:
 	const Vector &GetTip( void ) const			{ return m_Nodes[m_nCount - 1].m_vPos; }
 	Vector	GetTipVelocity( void ) const		{ return ( m_Nodes[m_nCount - 1].m_vPos - m_Nodes[m_nCount - 1].m_vPrevPos ) / TICK_INTERVAL; }
 	float	GetSegment( void ) const			{ return m_flSegment; }
+	// How long it is as it lies now, point to point
+	float	GetLength( void ) const;
 
 	// A free tip touched something this tick
 	bool	GetTipHit( trace_t *pTrace ) const	{ if ( m_bTipHit ) *pTrace = m_TipHit; return m_bTipHit; }
@@ -268,6 +273,12 @@ public:
 	// The other points pass through these: what the tongue holds
 	CBaseEntity *m_pDrapeIgnore[BARNACLE_MAX_JUNK + 1];
 	int		m_nDrapeIgnore;
+	// The throw. Each new bit of tongue leaves the start at m_vecFeedVelocity and
+	// then flies free, as the tip did before it, so all of the tongue follows the
+	// arc the tip took. Meanwhile the points are not held to each other and not
+	// slowed by the air; that starts when the throw is over, and the tongue settles.
+	bool	m_bFeeding;
+	Vector	m_vecFeedVelocity;
 	// How readily each point gives way to its neighbours: 1 for a bare point of
 	// tongue, less for one with something heavy on it. Set before every Step.
 	float	m_flInvMass[OF2_TONGUE_NODES];
@@ -275,7 +286,7 @@ public:
 private:
 	// Lays nCount points evenly along the way the tongue lies now, moving as it
 	// does. pStart: it starts from there instead (see Rebase).
-	void	Relay( const Vector *pStart, int nCount );
+	void	Relay( const Vector *pStart, bool bNewBend, int nCount );
 
 	int		m_nCount;
 	Vector	m_vecStart;
@@ -293,6 +304,8 @@ CBarnacleRope::CBarnacleRope()
 	m_bCollide = true;
 	m_pIgnore = NULL;
 	m_nDrapeIgnore = 0;
+	m_bFeeding = false;
+	m_vecFeedVelocity.Init();
 	m_nCount = 2;
 	m_vecStart.Init();
 	m_vecTipPin.Init();
@@ -322,13 +335,24 @@ void CBarnacleRope::Seed( const Vector &vecStart, const Vector &vecTipVelocity )
 	m_bTipHit = false;
 }
 
-void CBarnacleRope::Rebase( const Vector &vecStart )
+float CBarnacleRope::GetLength( void ) const
 {
-	Relay( &vecStart, m_nCount );
+	float flLength = 0.0f;
+	for ( int i = 1; i < m_nCount; i++ )
+	{
+		flLength += m_Nodes[i].m_vPos.DistTo( m_Nodes[i - 1].m_vPos );
+	}
+
+	return flLength;
+}
+
+void CBarnacleRope::Rebase( const Vector &vecStart, bool bNewBend )
+{
+	Relay( &vecStart, bNewBend, m_nCount );
 	m_vecStart = vecStart;
 }
 
-void CBarnacleRope::Relay( const Vector *pStart, int nCount )
+void CBarnacleRope::Relay( const Vector *pStart, bool bNewBend, int nCount )
 {
 	Vector vecPos[OF2_TONGUE_NODES + 1];
 	Vector vecMove[OF2_TONGUE_NODES + 1];
@@ -337,33 +361,34 @@ void CBarnacleRope::Relay( const Vector *pStart, int nCount )
 
 	if ( pStart )
 	{
+		vecPos[nSource] = *pStart;
+		vecMove[nSource] = vec3_origin;
+		nSource++;
+	}
+
+	if ( pStart && bNewBend )
+	{
 		// Where the run of points comes nearest the new start
 		float flBest = FLT_MAX;
 		int iBest = 0;
-		float flBestT = 0.0f;
 		for ( int i = 0; i < m_nCount - 1; i++ )
 		{
-			float t;
-			float flDist = CalcDistanceToLineSegment( *pStart, m_Nodes[i].m_vPos, m_Nodes[i + 1].m_vPos, &t );
+			float flDist = CalcDistanceToLineSegment( *pStart, m_Nodes[i].m_vPos, m_Nodes[i + 1].m_vPos );
 			if ( flDist < flBest )
 			{
 				flBest = flDist;
 				iBest = i;
-				flBestT = t;
 			}
 		}
 
-		// A new bend lies on the tongue: what is before it is no longer loose. A
-		// bend that went leaves the start further back: the tongue runs straight
-		// from there to where it used to start.
-		vecPos[nSource] = *pStart;
-		vecMove[nSource] = vec3_origin;
-		nSource++;
-
-		if ( flBest < BARNACLE_REBASE_DIST && ( iBest > 0 || flBestT > 0.01f ) )
-		{
-			iFirst = iBest + 1;
-		}
+		// The tongue has come to lie over an edge. What is before that place on
+		// it is no longer loose, however far off the edge the points are (thrown
+		// in an arc, they can be well above it): kept, the tongue would run from
+		// the bend back to where it used to start and out again. The old start
+		// goes in any case. (A bend that went is the other way round: the start
+		// is further back, and the tongue runs straight from there to where it
+		// used to start, so every point stays.)
+		iFirst = iBest + 1;
 	}
 
 	for ( int i = iFirst; i < m_nCount; i++ )
@@ -379,6 +404,13 @@ void CBarnacleRope::Relay( const Vector *pStart, int nCount )
 		vecPos[1] = vecPos[0];
 		vecMove[1] = vecMove[0];
 		nSource = 2;
+	}
+
+	if ( m_bFeeding )
+	{
+		// What is just coming out of the start moves as the throw does, so the
+		// points laid between there and the first one out get that too
+		vecMove[0] = m_vecFeedVelocity * TICK_INTERVAL;
 	}
 
 	float flTotal = 0.0f;
@@ -444,7 +476,7 @@ void CBarnacleRope::Step( const Vector &vecStart, float flLength, const Vector *
 	int nWanted = clamp( (int)( flLinks + 0.5f ) + 1, 2, OF2_TONGUE_NODES );
 	if ( nWanted != m_nCount && fabs( flLinks - ( m_nCount - 1 ) ) > 0.75f )
 	{
-		Relay( NULL, nWanted );
+		Relay( NULL, false, nWanted );
 	}
 
 	m_flSegment = flLength / ( m_nCount - 1 );
@@ -470,7 +502,7 @@ void CBarnacleRope::GetNodeForces( CSimplePhysics::CNode *pNodes, int iNode, Vec
 
 	// The tip is not held back by the air; that would only shorten the throw
 	float flDrag = of2_barnacle_rope_drag.GetFloat();
-	if ( iNode < m_nCount - 1 && flDrag > 0.0f )
+	if ( iNode < m_nCount - 1 && flDrag > 0.0f && !m_bFeeding )
 	{
 		Vector vecVelocity = ( pNodes[iNode].m_vPos - pNodes[iNode].m_vPrevPos ) / TICK_INTERVAL;
 		*pAccel -= vecVelocity * ( 2.0f * flDrag );
@@ -481,10 +513,15 @@ void CBarnacleRope::ApplyConstraints( CSimplePhysics::CNode *pNodes, int nNodes 
 {
 	int iTip = nNodes - 1;
 
+	// During the throw nothing holds the points to each other (see m_bFeeding):
+	// only the start stays where it is
+	int nPasses = m_bFeeding ? 0 : BARNACLE_ROPE_ITERATIONS;
+	pNodes[0].m_vPos = m_vecStart;
+
 	// Neighbours no further apart than the tongue between them. Slack is fine.
 	// Each gives way by its share: a held point not at all, one with something
 	// heavy on it less than a bare one.
-	for ( int k = 0; k < BARNACLE_ROPE_ITERATIONS; k++ )
+	for ( int k = 0; k < nPasses; k++ )
 	{
 		pNodes[0].m_vPos = m_vecStart;
 		if ( m_bTipPinned )
@@ -513,7 +550,7 @@ void CBarnacleRope::ApplyConstraints( CSimplePhysics::CNode *pNodes, int nNodes 
 	// A few passes over the links leave a long tongue with a heavy tip
 	// stretchy. This doesn't: no point is further from a held end than the
 	// tongue between the two is long.
-	for ( int i = 1; i <= iTip; i++ )
+	for ( int i = 1; i <= iTip && !m_bFeeding; i++ )
 	{
 		if ( i == iTip && m_bTipPinned )
 			break;
@@ -751,6 +788,11 @@ private:
 	float		m_flMaxLength;
 	// Still on its way out from the throw: the tongue follows the tip freely
 	bool		m_bPayingOut;
+	// The velocity the tip was thrown at; the rest of the tongue is fed out at the same
+	Vector		m_vecLaunchVelocity;
+	bool		m_bWasFeeding;
+	// What the throw left the tongue longer than it needs to be; taken up as it settles
+	float		m_flSlack;
 	// The tether's bends at the last tick; a change moves where the loose part starts
 	int			m_nLastPivots;
 
@@ -834,6 +876,9 @@ CWeaponBarnacle::CWeaponBarnacle()
 	m_bTongueOut = false;
 	m_flMaxLength = 0.0f;
 	m_bPayingOut = false;
+	m_vecLaunchVelocity.Init();
+	m_bWasFeeding = false;
+	m_flSlack = 0.0f;
 	m_nLastPivots = 0;
 	m_iTip = TIP_FREE;
 	m_bTipOnEntity = false;
@@ -1029,6 +1074,9 @@ void CWeaponBarnacle::Throw( void )
 	vecVelocity.z += of2_barnacle_throw_up.GetFloat();
 
 	m_Rope.Seed( vecMouth, vecVelocity );
+	m_vecLaunchVelocity = vecVelocity;
+	m_bWasFeeding = false;
+	m_flSlack = 0.0f;
 
 	m_Tether.Init( vecMouth, vecMouth, 1.0f );
 	m_Tether.SetPlayerEnd( TETHER_START );
@@ -1328,6 +1376,18 @@ void CWeaponBarnacle::UpdateAnchored( CHL2_Player *pPlayer, const Vector &vecTip
 		// From what the player has now, not from the most there could be
 		m_flLeash = MIN( m_flLeash, flFixed + flSwing ) - of2_barnacle_reel_speed.GetFloat() * TICK_INTERVAL;
 		m_flLeash = MAX( m_flLeash, flFixed + flClosest );
+
+		// On their feet with nothing left to reel in, and as near as that gets
+		// them: the tongue has done what it can, and comes back by itself (the
+		// user asked for this: pulled up over an edge, they had to let go of it
+		// by hand every time)
+		if ( of2_barnacle_auto_release.GetBool() && pPlayer->GetGroundEntity() != NULL &&
+			 m_flLeash <= flFixed + flClosest &&
+			 vecHand.DistTo( m_Tether.GetSwingPoint() ) <= flClosest + BARNACLE_RELEASE_DIST )
+		{
+			StartRetract();
+			return;
+		}
 	}
 	else if ( m_bExtruding )
 	{
@@ -1893,8 +1953,45 @@ void CWeaponBarnacle::TongueThink( void )
 	bool bPinned = GetTipPin( &vecPin );
 	Vector vecStart = ( m_Tether.GetPivotCount() > 0 ) ? m_Tether.GetNearestPoint( TETHER_END ) : vecNear;
 
+	// The throw, with nothing in the tongue's way yet: it is fed out of the
+	// barnacle rather than pulled out by the tip. Every bit of it leaves at the
+	// velocity the tip was thrown at and flies free, so the whole tongue lies
+	// along the arc the tip took. Its length is whatever has come out.
+	bool bFeeding = m_bPayingOut && !bPinned && m_Tether.GetPivotCount() == 0;
+
 	float flLength = m_Tether.GetFarEndAllowance();
-	if ( m_bPayingOut && !bPinned )
+	if ( bFeeding )
+	{
+		flLength = m_Rope.GetLength() + m_Rope.GetTipVelocity().Length() * TICK_INTERVAL;
+		if ( flLength >= m_flMaxLength )
+		{
+			// All out: from here the tongue holds the tip back
+			bFeeding = false;
+			m_bPayingOut = false;
+			flLength = m_flMaxLength;
+			m_Tether.SetTotalLength( m_flMaxLength );
+		}
+	}
+
+	if ( !bFeeding )
+	{
+		// The throw is over. The arc is longer than the straight line the
+		// tongue is now measured by; rather than snap to that, it keeps the
+		// difference as slack and gives it up as it settles.
+		if ( m_bWasFeeding )
+		{
+			m_flSlack = MAX( m_Rope.GetLength() - flLength, 0.0f );
+		}
+
+		flLength += m_flSlack;
+		m_flSlack = MAX( m_flSlack - of2_barnacle_settle_speed.GetFloat() * TICK_INTERVAL, 0.0f );
+	}
+
+	m_bWasFeeding = bFeeding;
+	m_Rope.m_bFeeding = bFeeding;
+	m_Rope.m_vecFeedVelocity = m_vecLaunchVelocity;
+
+	if ( m_bPayingOut && !bPinned && !bFeeding )
 	{
 		// The tongue comes out as fast as the tip takes it, so the throw isn't
 		// held back by a length measured a tick ago
@@ -1950,7 +2047,7 @@ void CWeaponBarnacle::TongueThink( void )
 	// A bend that came or went moved where the loose part starts
 	if ( m_Tether.GetPivotCount() != m_nLastPivots )
 	{
-		m_Rope.Rebase( m_Tether.GetNearestPoint( TETHER_END ) );
+		m_Rope.Rebase( m_Tether.GetNearestPoint( TETHER_END ), m_Tether.GetPivotCount() > m_nLastPivots );
 		m_nLastPivots = m_Tether.GetPivotCount();
 	}
 
