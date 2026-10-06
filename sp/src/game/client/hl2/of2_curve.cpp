@@ -50,6 +50,13 @@
 // A disc is a middle point, a ring this far out, and its rim
 #define BLOB_DISC_RING		0.7f
 
+// The highlight's round ending on that disc: how many sides its half oval
+// has, how far past the disc's middle it reaches (as a share of the disc's
+// size), and how far in front of the disc it is drawn
+#define GLINT_SIDES			8
+#define GLINT_LENGTH		0.55f
+#define GLINT_FORWARD		0.3f
+
 // However the light falls, a side is never shaded darker or brighter than this
 #define TUBE_SIDE_MIN		0.4f
 #define TUBE_SIDE_MAX		1.8f
@@ -183,6 +190,79 @@ static void DrawDisc( IMaterial *pMaterial, const Vector &vecCenter, float flRad
 			meshBuilder.Normal3fv( vecFace[r][s].Base() );
 			meshBuilder.Color4f( vecShade[r][s].x, vecShade[r][s].y, vecShade[r][s].z, 1.0f );
 			meshBuilder.TexCoord2f( 0, flAcross[r][s], flTexCoord );
+			meshBuilder.AdvanceVertex();
+		}
+	}
+
+	meshBuilder.End();
+	pMesh->Draw();
+}
+
+//-----------------------------------------------------------------------------
+// The highlight's own round ending, on the disc that ends the tube: half an
+// oval that carries on from where the streak along the tube stops (at the
+// disc's middle line, flPeak across it), as wide as the streak and as bright
+// across, fading out towards the end. Only that half: over the tube itself
+// the streak is drawn already, and twice would be twice as bright.
+//-----------------------------------------------------------------------------
+static void DrawGlint( IMaterial *pMaterial, const Vector &vecCenter, float flRadius, const Vector &vecView, const Vector &vecSide, const Vector &vecDir,
+	const Vector &vecLight, float flPeak, float flHalfWidth, float flShine )
+{
+	// The way the tube runs, as the disc lies
+	Vector vecOn = CrossProduct( vecView, vecSide );
+	if ( VectorNormalize( vecOn ) < 0.01f )
+		return;
+
+	if ( DotProduct( vecOn, vecDir ) < 0.0f )
+	{
+		vecOn = -vecOn;
+	}
+
+	// Well in front of the disc, towards the eye: that moves nothing on screen,
+	// and leaves no doubt which of the two is in front
+	Vector vecMiddle = vecCenter + vecSide * ( flPeak * flRadius ) + vecView * GLINT_FORWARD;
+	float flWide = flHalfWidth * flRadius;
+	float flLong = MIN( GLINT_LENGTH, 0.9f - fabs( flPeak ) ) * flRadius;
+	if ( flLong <= 0.0f )
+		return;
+
+	// The middle, a ring where the hot line gives way to the glow, and the rim
+	Vector vecPos[2][GLINT_SIDES + 1];
+	static const float flOut[2] = { TUBE_SHINE_CORE, 1.0f };
+	for ( int r = 0; r < 2; r++ )
+	{
+		for ( int i = 0; i <= GLINT_SIDES; i++ )
+		{
+			float flAngle = M_PI_F * i / GLINT_SIDES;
+			vecPos[r][i] = vecMiddle + ( vecSide * ( cos( flAngle ) * flWide ) + vecOn * ( sin( flAngle ) * flLong ) ) * flOut[r];
+		}
+	}
+
+	Vector vecHot( MIN( vecLight.x * flShine, 1.0f ), MIN( vecLight.y * flShine, 1.0f ), MIN( vecLight.z * flShine, 1.0f ) );
+	Vector vecGlow = vecHot * TUBE_SHINE_GLOW;
+
+	CMatRenderContextPtr pRenderContext( materials );
+	IMesh *pMesh = pRenderContext->GetDynamicMesh( true, NULL, NULL, pMaterial );
+
+	CMeshBuilder meshBuilder;
+	meshBuilder.Begin( pMesh, MATERIAL_TRIANGLES, GLINT_SIDES * 3 );
+
+	for ( int i = 0; i < GLINT_SIDES; i++ )
+	{
+		// Corners: which ring, which side, how bright (0 hot, 1 glow, 2 none)
+		static const int iCorner[9][3] = {
+			{ -1, 0, 0 }, { 0, 0, 1 }, { 0, 1, 1 },
+			{ 0, 0, 1 }, { 1, 0, 2 }, { 1, 1, 2 },
+			{ 0, 0, 1 }, { 1, 1, 2 }, { 0, 1, 1 } };
+
+		for ( int k = 0; k < 9; k++ )
+		{
+			const Vector &vecAt = ( iCorner[k][0] < 0 ) ? vecMiddle : vecPos[iCorner[k][0]][i + iCorner[k][1]];
+			Vector vecBright = ( iCorner[k][2] == 0 ) ? vecHot : ( ( iCorner[k][2] == 1 ) ? vecGlow : vec3_origin );
+
+			meshBuilder.Position3fv( vecAt.Base() );
+			meshBuilder.Color4f( vecBright.x, vecBright.y, vecBright.z, 1.0f );
+			meshBuilder.TexCoord2f( 0, 0.5f, 0.5f );
 			meshBuilder.AdvanceVertex();
 		}
 	}
@@ -361,6 +441,13 @@ static void DrawTube( IMaterial *pMaterial, const Vector *pPos, const Vector *pC
 	{
 		int iAt = pDiscs[i];
 		DrawDisc( pMaterial, pPos[iAt], pRadius[iAt], s_vecView[iAt], s_vecSide[iAt], pColor[iAt], pBox[iAt], pTexCoord[iAt], style );
+
+		// The wet streak ends round on it too
+		if ( style.pShineMaterial && style.flShine > 0.0f && iAt > 0 )
+		{
+			DrawGlint( style.pShineMaterial, pPos[iAt], pRadius[iAt], s_vecView[iAt], s_vecSide[iAt], pPos[iAt] - pPos[iAt - 1],
+				pColor[iAt], s_flAcross[iAt][TUBE_MIDDLE], flShineEdge, style.flShine );
+		}
 	}
 }
 

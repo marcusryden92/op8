@@ -44,6 +44,8 @@
 
 ConVar of2_climbrope_grab_dist( "of2_climbrope_grab_dist", "24", FCVAR_NONE, "How close the player's hand has to come to a climb rope to catch it in mid-air. Use reaches a little further." );
 ConVar of2_climbrope_regrab_time( "of2_climbrope_regrab_time", "1.0", FCVAR_NONE, "Seconds after letting go of a climb rope before touching it catches it again." );
+ConVar of2_climbrope_slide_speed( "of2_climbrope_slide_speed", "200", FCVAR_NONE, "Where a held climb rope goes over an edge it slides along the edge, towards where it pulls on it evenly. This is its speed at the hardest pull. 0: it stays where it first touched." );
+ConVar of2_climbrope_slide_friction( "of2_climbrope_slide_friction", "0.1", FCVAR_NONE, "How lopsided the pull has to be before a climb rope slides along an edge (0 always, 1 only when dragged almost straight along it)." );
 ConVar of2_climbrope_debug( "of2_climbrope_debug", "0", FCVAR_NONE, "Draw climb ropes' tethers, and the points of loose ones, as debug lines." );
 
 class CFuncClimbRope : public CBaseEntity
@@ -300,6 +302,7 @@ void CFuncClimbRope::UpdateHeld( CHL2_Player *pPlayer )
 
 	float flFixed = m_Tether.GetFixedLength( TETHER_END );
 	m_Tether.SetTotalLength( MIN( flFixed + pPlayer->GetTetherSwingLength(), m_flLength.Get() ) );
+	m_Tether.SetSliding( of2_climbrope_slide_speed.GetFloat(), of2_climbrope_slide_friction.GetFloat() );
 	m_Tether.Update( GetAbsOrigin(), vecHand );
 
 	// A pivot that came or went moved the point the player swings from, and

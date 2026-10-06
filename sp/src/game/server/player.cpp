@@ -6562,6 +6562,7 @@ void CBasePlayer::CheatImpulseCommands( int iImpulse )
 		GiveNamedItem( "weapon_knife" );		// OF2
 		GiveNamedItem( "weapon_barnacle" );		// OF2
 		GiveNamedItem( "weapon_deagle" );		// OF2
+		GiveNamedItem( "weapon_k98" );			// OF2
 #endif
 		if ( GetHealth() < 100 )
 		{

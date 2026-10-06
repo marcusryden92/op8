@@ -26,8 +26,10 @@ public:
 
 	// Lays the rope out along a path from its root (pPath[0]). What is left past
 	// the end of the path carries on straight down. It starts moving at
-	// vecVelocity at its free end, less towards the root.
-	void	Seed( const Vector *pPath, int nPath, float flLength, const Vector &vecVelocity );
+	// vecVelocity at its free end, less towards the root. bSpread: a rope longer
+	// than the path is laid along all of it instead, bunched up evenly, and
+	// nothing of it goes on past the path's end.
+	void	Seed( const Vector *pPath, int nPath, float flLength, const Vector &vecVelocity, bool bSpread = false );
 
 	// Hanging straight down from the root
 	void	SeedHanging( const Vector &vecRoot, float flLength );

@@ -3,7 +3,9 @@
 // Purpose: OF2: Tether. A line of fixed total length between two points that
 //			wraps around the static world: where it would cut through geometry
 //			it gets a pivot, and the pivot goes again once the line has come
-//			off the corner. Shared by the climbable map rope and the Barnacle.
+//			off the corner. Meanwhile the pivot slides along its edge to where
+//			the line pulls on it evenly. Shared by the climbable map rope and
+//			the Barnacle.
 //
 //			Not an entity. Whoever owns one embeds it (DEFINE_EMBEDDED) and
 //			calls Update() with where the two ends are now.
@@ -43,12 +45,19 @@ public:
 
 	void	SetWrapping( bool bWrap )				{ m_bWrap = bWrap; }
 
+	// How readily its pivots slide along the edges they sit on, towards where
+	// the line pulls on them evenly. flSpeed: at the hardest pull (0: they stay
+	// where they were made). flFriction: how lopsided the pull has to be before
+	// one moves at all (0 always, 1 only dragged almost straight along the edge).
+	// Not saved: the owner sets it.
+	void	SetSliding( float flSpeed, float flFriction )	{ m_flSlideSpeed = flSpeed; m_flSlideFriction = flFriction; }
+
 	// Points in order: 0 is the start, GetPointCount() - 1 the end, pivots in between
 	int		GetPointCount( void ) const				{ return m_nPivots + 2; }
 	const Vector &GetPoint( int iPoint ) const;
 	int		GetPivotCount( void ) const				{ return m_nPivots; }
 	// One more pivot, after the others (when laying a tether along a known path)
-	void	AppendPivot( const Vector &vecPivot, const Vector &vecOut )	{ if ( m_nPivots < OF2_TETHER_MAX_PIVOTS ) InsertPivot( m_nPivots, vecPivot, vecOut ); }
+	void	AppendPivot( const Vector &vecPivot, const Vector &vecOut )	{ if ( m_nPivots < OF2_TETHER_MAX_PIVOTS ) InsertPivot( m_nPivots, vecPivot, vecOut, vec3_origin ); }
 	// Drops the pivots after the first nKeep, counted from the start
 	void	TruncatePivots( int nKeep )				{ m_nPivots = clamp( nKeep, 0, m_nPivots ); }
 
@@ -101,12 +110,15 @@ public:
 private:
 	// Adds pivots to the segment between a moved end and the point next to it
 	void	WrapEnd( OF2TetherEnd_t end, const Vector &vecOld );
-	bool	FindPivot( const Vector &vecFixed, const Vector &vecMoving, const Vector &vecMovingOld, Vector *pPivot, Vector *pOut ) const;
+	bool	FindPivot( const Vector &vecFixed, const Vector &vecMoving, const Vector &vecMovingOld, Vector *pPivot, Vector *pOut, Vector *pEdge ) const;
 
 	// Removes the pivot next to an end once the line has come off its corner
 	bool	UnwrapEnd( OF2TetherEnd_t end );
 
-	void	InsertPivot( int iPivot, const Vector &vecPivot, const Vector &vecOut );
+	// Moves the pivots along their edges to where the line pulls them
+	void	SlidePivots( void );
+
+	void	InsertPivot( int iPivot, const Vector &vecPivot, const Vector &vecOut, const Vector &vecEdge );
 	void	RemovePivot( int iPivot );
 
 	static bool	IsBlocked( const Vector &vecFrom, const Vector &vecTo, trace_t *pTrace );
@@ -119,6 +131,9 @@ private:
 	Vector	m_vecPivots[OF2_TETHER_MAX_PIVOTS];
 	// For each pivot, the direction away from the corner it sits on
 	Vector	m_vecPivotOut[OF2_TETHER_MAX_PIVOTS];
+	// ...and the direction that edge runs in, which it can slide along. Zero
+	// if that isn't known: it stays put then.
+	Vector	m_vecPivotEdge[OF2_TETHER_MAX_PIVOTS];
 	int		m_nPivots;
 
 	// Only climbing, reeling and paying out change this
@@ -128,6 +143,8 @@ private:
 	int		m_iHeldEnd;
 	bool	m_bHeldAtWeapon;
 	bool	m_bWrap;
+	float	m_flSlideSpeed;
+	float	m_flSlideFriction;
 
 	EHANDLE	m_hBeams[OF2_TETHER_MAX_PIVOTS + 1];
 	EHANDLE	m_hEndEntity;

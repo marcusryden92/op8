@@ -9,6 +9,7 @@
 //			15 damage as DMG_SLASH, stab 50 as DMG_CLUB, and its hit times of
 //			0.25 and 0.45 seconds into the swing, which is where the blade
 //			crosses the middle of the screen in the viewmodel's animations.
+//			Its push is cut down (of2_knife_push).
 //
 //			It is a crowbar underneath: the swing, the delayed hit and the hit
 //			sounds are CBaseHLBludgeonWeapon's, and an NPC given one uses it
@@ -33,6 +34,10 @@ ConVar of2_knife_slash_delay( "of2_knife_slash_delay", "0.25", FCVAR_NONE, "Seco
 ConVar of2_knife_slash_recover( "of2_knife_slash_recover", "0.05", FCVAR_NONE, "Seconds from a knife slash's hit to the next attack." );
 ConVar of2_knife_stab_delay( "of2_knife_stab_delay", "0.45", FCVAR_NONE, "Seconds from the start of a knife stab to the hit." );
 ConVar of2_knife_stab_recover( "of2_knife_stab_recover", "0.3", FCVAR_NONE, "Seconds from a knife stab's hit to the next attack." );
+
+// Melee pushes by the damage, so at full push the stab shoves like five crowbar hits and
+// sends bodies flying. 0.2 makes a stab push like one crowbar hit.
+ConVar of2_knife_push( "of2_knife_push", "0.2", FCVAR_NONE, "How hard the knife pushes what it hits (bodies included), as a fraction of the usual melee push for its damage." );
 
 // However the convars are set, an attack takes this long
 #define KNIFE_MIN_REFIRE	0.1f
@@ -59,6 +64,7 @@ public:
 	float		GetHitDelay();
 	int			GetDamageType()			{	return	m_bStab ? DMG_CLUB : DMG_SLASH;	}
 	float		GetDamageForActivity( Activity hitActivity );
+	float		GetDamageForceScale()	{	return	MAX( of2_knife_push.GetFloat(), 0.0f );	}
 	Activity	GetPrimaryAttackActivity( void )	{	return	m_bStab ? ACT_VM_SECONDARYATTACK : ACT_VM_HITCENTER;	}
 
 	bool		SendWeaponAnim( int iActivity );

@@ -1001,6 +1001,13 @@ bool CViewRender::ShouldDrawViewModel( bool bDrawViewmodel )
 	if ( render->GetViewEntity() > gpGlobals->maxClients )
 		return false;
 
+#ifdef HL2_EPISODIC
+	// OF2: looking through a sniper scope (hl2\hud_scope.cpp)
+	extern bool OF2_IsScopeView( void );
+	if ( OF2_IsScopeView() )
+		return false;
+#endif
+
 	return true;
 }
 

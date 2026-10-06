@@ -424,6 +424,13 @@ bool CHUDQuickInfo::ShouldDraw( void )
 	if ( !crosshair.GetBool() && !IsX360() )
 		return false;
 
+#ifdef HL2_EPISODIC
+	// OF2: no brackets over the sniper scope (hud_scope.cpp)
+	extern bool OF2_IsScopeView( void );
+	if ( OF2_IsScopeView() )
+		return false;
+#endif
+
 	return ( CHudElement::ShouldDraw() && !engine->IsDrawingLoadingImage() );
 }
 

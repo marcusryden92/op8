@@ -237,8 +237,39 @@ void C_OF2ClimbRope::ClientThink( void )
 	{
 		if ( bHeld )
 		{
-			// Taken hold of: what is past the hand hangs from it
-			m_Sim.SeedHanging( OF2_TetherHoldPos( pPlayer, false ), GetTailLength() );
+			// Taken hold of: what is past the hand stays where it lay (slack on
+			// a roof stays on the roof, to be drawn off it as the player goes),
+			// from the place on the loose rope nearest the hand. With no loose
+			// rope to go by, it hangs from the hand.
+			Vector vecHand = OF2_TetherHoldPos( pPlayer, false );
+			if ( m_Sim.IsSeeded() )
+			{
+				int iNearest = 0;
+				float flNearest = FLT_MAX;
+				for ( int i = 0; i < m_Sim.GetNodeCount() - 1; i++ )
+				{
+					float flDist = CalcDistanceToLineSegment( vecHand, m_Sim.GetNode( i ), m_Sim.GetNode( i + 1 ) );
+					if ( flDist < flNearest )
+					{
+						flNearest = flDist;
+						iNearest = i;
+					}
+				}
+
+				Vector vecPath[OF2_ROPE_SIM_MAX_NODES + 1];
+				int nPath = 0;
+				vecPath[nPath++] = vecHand;
+				for ( int i = iNearest + 1; i < m_Sim.GetNodeCount(); i++ )
+				{
+					vecPath[nPath++] = m_Sim.GetNode( i );
+				}
+
+				m_Sim.Seed( vecPath, nPath, GetTailLength(), vec3_origin, true );
+			}
+			else
+			{
+				m_Sim.SeedHanging( vecHand, GetTailLength() );
+			}
 			m_Sim.SetDamping( CLIMBROPE_TAIL_DAMPING );
 		}
 		else if ( m_bWasHeld && pPlayer )

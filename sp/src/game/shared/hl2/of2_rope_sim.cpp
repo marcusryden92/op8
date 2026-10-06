@@ -30,6 +30,9 @@
 // Share of its speed along a surface a point loses when it touches one
 #define ROPE_FRICTION			0.3f
 
+// How many surfaces a point slides along in one step before it stops
+#define ROPE_SLIDES				2
+
 COF2RopeSim::COF2RopeSim()
 {
 	m_nNodes = 0;
@@ -47,7 +50,7 @@ int COF2RopeSim::NodesFor( float flLength )
 	return clamp( (int)( flLength / OF2_ROPE_SIM_SPACING ) + 2, 2, OF2_ROPE_SIM_MAX_NODES );
 }
 
-void COF2RopeSim::Seed( const Vector *pPath, int nPath, float flLength, const Vector &vecVelocity )
+void COF2RopeSim::Seed( const Vector *pPath, int nPath, float flLength, const Vector &vecVelocity, bool bSpread )
 {
 	if ( nPath < 1 )
 		return;
@@ -60,12 +63,24 @@ void COF2RopeSim::Seed( const Vector *pPath, int nPath, float flLength, const Ve
 	m_bEndPinned = false;
 	m_vecRootWas = pPath[0];
 
-	// Walk the path, a point every m_flSegment
+	// Walk the path, a point every m_flSegment; or, spread, every so much
+	// that the last point comes out at the end of the path
+	float flEvery = m_flSegment;
+	if ( bSpread && nPath > 1 )
+	{
+		float flPath = 0.0f;
+		for ( int i = 1; i < nPath; i++ )
+		{
+			flPath += pPath[i].DistTo( pPath[i - 1] );
+		}
+		flEvery = MIN( flEvery, flPath / ( m_nNodes - 1 ) );
+	}
+
 	int iLeg = 0;
 	float flLegStart = 0.0f;
 	for ( int i = 0; i < m_nNodes; i++ )
 	{
-		float flAlong = i * m_flSegment;
+		float flAlong = i * flEvery;
 
 		while ( iLeg < nPath - 1 && flAlong > flLegStart + pPath[iLeg].DistTo( pPath[iLeg + 1] ) )
 		{
@@ -204,20 +219,24 @@ void COF2RopeSim::Step( const Vector &vecRoot, const Vector &vecWind )
 		}
 	}
 
-	// Between two held ends, a few passes over the links leave a long rope
-	// looking like rubber. This doesn't: no point is further from either end
-	// than the rope between the two is long.
-	if ( m_bEndPinned )
+	// A few passes over the links leave a long rope looking like rubber, and
+	// one that lies on a roof is hardly dragged along by a root that has gone
+	// over the edge. This doesn't, and it is: no point is further from a held
+	// end than the rope between the two is long.
+	for ( int i = 1; i <= iLast; i++ )
 	{
-		for ( int i = 1; i < iLast; i++ )
-		{
-			Vector vecOut = m_vecPos[i] - vecRoot;
-			float flOut = vecOut.Length();
-			if ( flOut > flSegment * i && flOut > 0.001f )
-			{
-				m_vecPos[i] = vecRoot + vecOut * ( flSegment * i / flOut );
-			}
+		if ( i == iLast && m_bEndPinned )
+			break;
 
+		Vector vecOut = m_vecPos[i] - vecRoot;
+		float flOut = vecOut.Length();
+		if ( flOut > flSegment * i && flOut > 0.001f )
+		{
+			m_vecPos[i] = vecRoot + vecOut * ( flSegment * i / flOut );
+		}
+
+		if ( m_bEndPinned )
+		{
 			vecOut = m_vecPos[i] - m_vecEndPin;
 			flOut = vecOut.Length();
 			if ( flOut > flSegment * ( iLast - i ) && flOut > 0.001f )
@@ -227,20 +246,46 @@ void COF2RopeSim::Step( const Vector &vecRoot, const Vector &vecWind )
 		}
 	}
 
-	// A point that moved into the world stops where it touched it, and drags
+	// A point that moved into the world goes on along what it touched, and
+	// drags. (Stopped dead where it touched, a rope lying on a roof stayed
+	// there when its other end was carried over the edge: every pull on it
+	// goes a little into the roof.)
 	CTraceFilterWorldAndPropsOnly filter;
 	for ( int i = 1; i < ( m_bEndPinned ? iLast : m_nNodes ); i++ )
 	{
-		trace_t tr;
-		UTIL_TraceLine( vecStart[i], m_vecPos[i], MASK_SOLID_BRUSHONLY, &filter, &tr );
-		if ( tr.startsolid || tr.fraction == 1.0f )
+		Vector vecFrom = vecStart[i];
+		Vector vecTo = m_vecPos[i];
+		bool bTouched = false;
+		Vector vecNormal( 0, 0, 1 );
+
+		for ( int k = 0; k < ROPE_SLIDES; k++ )
+		{
+			trace_t tr;
+			UTIL_TraceLine( vecFrom, vecTo, MASK_SOLID_BRUSHONLY, &filter, &tr );
+			if ( tr.startsolid || tr.fraction == 1.0f )
+				break;
+
+			bTouched = true;
+			vecNormal = tr.plane.normal;
+
+			// The rest of the way, less the part of it into the surface
+			vecFrom = tr.endpos + vecNormal * 0.1f;
+			Vector vecRest = vecTo - vecFrom;
+			vecRest -= vecNormal * DotProduct( vecRest, vecNormal );
+			vecTo = vecFrom + vecRest;
+		}
+
+		if ( !bTouched )
 			continue;
 
-		m_vecPos[i] = tr.endpos + tr.plane.normal * 0.1f;
+		// (if the last try was cut short too, it stays where that one began)
+		trace_t tr;
+		UTIL_TraceLine( vecFrom, vecTo, MASK_SOLID_BRUSHONLY, &filter, &tr );
+		m_vecPos[i] = ( tr.startsolid || tr.fraction == 1.0f ) ? vecTo : vecFrom;
 
 		// Keep some of the speed along the surface, none into it
 		Vector vecVelocity = m_vecPos[i] - m_vecPrev[i];
-		vecVelocity -= tr.plane.normal * DotProduct( vecVelocity, tr.plane.normal );
+		vecVelocity -= vecNormal * DotProduct( vecVelocity, vecNormal );
 		m_vecPrev[i] = m_vecPos[i] - vecVelocity * ( 1.0f - ROPE_FRICTION );
 	}
 }

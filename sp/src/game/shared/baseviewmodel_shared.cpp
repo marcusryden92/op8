@@ -430,6 +430,15 @@ static ConVar of2_viewmodel_pitch( "of2_viewmodel_pitch", "0", FCVAR_NONE, "Tilt
 static ConVar of2_viewmodel_yaw( "of2_viewmodel_yaw", "0", FCVAR_NONE, "Turns the viewmodel left (degrees; negative is right)." );
 static ConVar of2_viewmodel_roll( "of2_viewmodel_roll", "0", FCVAR_NONE, "Rolls the viewmodel clockwise (degrees; negative is counterclockwise)." );
 static ConVar of2_viewmodel_scale( "of2_viewmodel_scale", "1", FCVAR_NONE, "Scales the viewmodel, on top of its script's \"viewmodel_scale\"." );
+static ConVar of2_viewmodel_pitch_shift( "of2_viewmodel_pitch_shift", "-1", FCVAR_NONE, "How far the viewmodel moves with view pitch (1 is HL2's, 0 is none), in place of its script's \"viewmodel_pitch_shift\". -1 uses the script's." );
+
+static float OF2_GetViewModelPitchShift( C_BaseCombatWeapon *pWeapon )
+{
+	if ( of2_viewmodel_pitch_shift.GetFloat() >= 0.0f )
+		return of2_viewmodel_pitch_shift.GetFloat();
+
+	return pWeapon ? pWeapon->GetWpnData().m_flViewmodelPitchShift : 1.0f;
+}
 
 static void OF2_GetViewModelOffset( C_BaseCombatWeapon *pWeapon, Vector &vecOffset, QAngle &angOffset )
 {
@@ -461,6 +470,7 @@ CON_COMMAND( of2_viewmodel_print, "Prints the held weapon's viewmodel placement 
 	Msg( "\t\"viewmodel_offset\"\t\t\"%g %g %g\"\n", vecOffset.x, vecOffset.y, vecOffset.z );
 	Msg( "\t\"viewmodel_angles\"\t\t\"%g %g %g\"\n", angOffset.x, angOffset.y, angOffset.z );
 	Msg( "\t\"viewmodel_scale\"\t\t\"%g\"\n", pWeapon->GetWpnData().m_flViewmodelScale * of2_viewmodel_scale.GetFloat() );
+	Msg( "\t\"viewmodel_pitch_shift\"\t\"%g\"\n", OF2_GetViewModelPitchShift( pWeapon ) );
 }
 #endif
 
@@ -645,6 +655,14 @@ void CBaseViewModel::CalcViewModelLag( Vector& origin, QAngle& angles, QAngle& o
 		origin = vOriginalOrigin;
 		angles = vOriginalAngles;
 	}
+
+	// OF2: scaled per weapon. At full look-down this pulls the gun about 3 units back, which
+	// puts a long rifle held at the cheek (the K98) into the camera.
+	float flPitchShift = 1.0f;
+#if defined( CLIENT_DLL )
+	flPitchShift = OF2_GetViewModelPitchShift( m_hWeapon.Get() );
+#endif
+	pitch *= flPitchShift;
 
 	//FIXME: These are the old settings that caused too many exposed polys on some models
 	VectorMA( origin, -pitch * 0.035f,	forward,	origin );

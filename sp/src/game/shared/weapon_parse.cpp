@@ -414,6 +414,8 @@ FileWeaponInfo_t::FileWeaponInfo_t()
 	m_vecViewmodelOffset.Init();	// OF2
 	m_angViewmodelOffset.Init();
 	m_flViewmodelScale = 1.0f;
+	m_flViewmodelPitchShift = 1.0f;
+	m_bScopeOverlay = false;
 }
 
 #ifdef CLIENT_DLL
@@ -499,6 +501,8 @@ void FileWeaponInfo_t::Parse( KeyValues *pKeyValuesData, const char *szWeaponNam
 	sscanf( pKeyValuesData->GetString( "viewmodel_offset", "" ), "%f %f %f", &m_vecViewmodelOffset.x, &m_vecViewmodelOffset.y, &m_vecViewmodelOffset.z );
 	sscanf( pKeyValuesData->GetString( "viewmodel_angles", "" ), "%f %f %f", &m_angViewmodelOffset.x, &m_angViewmodelOffset.y, &m_angViewmodelOffset.z );
 	m_flViewmodelScale = pKeyValuesData->GetFloat( "viewmodel_scale", 1.0f );
+	m_flViewmodelPitchShift = pKeyValuesData->GetFloat( "viewmodel_pitch_shift", 1.0f );
+	m_bScopeOverlay = pKeyValuesData->GetBool( "scope_overlay", false );
 
 #ifdef MAPBASE
 	m_flViewmodelFOV = pKeyValuesData->GetFloat( "viewmodel_fov", 0.0f );

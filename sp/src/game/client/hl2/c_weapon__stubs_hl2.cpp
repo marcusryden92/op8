@@ -43,6 +43,7 @@ STUB_WEAPON_CLASS( weapon_hopwire, WeaponHopwire, C_BaseHLCombatWeapon );
 STUB_WEAPON_CLASS( weapon_knife, WeaponKnife, C_WeaponCrowbar );	// OF2: server\hl2\weapon_knife.cpp
 STUB_WEAPON_CLASS( weapon_barnacle, WeaponBarnacle, C_BaseHLCombatWeapon );	// OF2: server\hl2\weapon_barnacle.cpp
 STUB_WEAPON_CLASS( weapon_deagle, WeaponDeagle, C_BaseHLCombatWeapon );	// OF2: server\hl2\weapon_deagle.cpp
+STUB_WEAPON_CLASS( weapon_k98, WeaponK98, C_BaseHLCombatWeapon );	// OF2: server\hl2\weapon_k98.cpp
 #endif
 #ifdef HL2_LOSTCOAST
 STUB_WEAPON_CLASS( weapon_oldmanharpoon, WeaponOldManHarpoon, C_WeaponCitizenPackage );

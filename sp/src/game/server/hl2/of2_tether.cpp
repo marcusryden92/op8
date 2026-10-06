@@ -46,6 +46,7 @@ BEGIN_SIMPLE_DATADESC( COF2Tether )
 	DEFINE_FIELD( m_vecEnd,			FIELD_POSITION_VECTOR ),
 	DEFINE_ARRAY( m_vecPivots,		FIELD_POSITION_VECTOR, OF2_TETHER_MAX_PIVOTS ),
 	DEFINE_ARRAY( m_vecPivotOut,	FIELD_VECTOR, OF2_TETHER_MAX_PIVOTS ),
+	DEFINE_ARRAY( m_vecPivotEdge,	FIELD_VECTOR, OF2_TETHER_MAX_PIVOTS ),
 	DEFINE_FIELD( m_nPivots,		FIELD_INTEGER ),
 	DEFINE_FIELD( m_flTotalLength,	FIELD_FLOAT ),
 	DEFINE_FIELD( m_iPlayerEnd,		FIELD_INTEGER ),
@@ -64,6 +65,7 @@ COF2Tether::COF2Tether()
 	{
 		m_vecPivots[i].Init();
 		m_vecPivotOut[i].Init();
+		m_vecPivotEdge[i].Init();
 	}
 	m_nPivots = 0;
 	m_flTotalLength = 0.0f;
@@ -71,6 +73,8 @@ COF2Tether::COF2Tether()
 	m_iHeldEnd = TETHER_NONE;
 	m_bHeldAtWeapon = false;
 	m_bWrap = true;
+	m_flSlideSpeed = 0.0f;
+	m_flSlideFriction = 0.0f;
 }
 
 void COF2Tether::Init( const Vector &vecStart, const Vector &vecEnd, float flTotalLength )
@@ -198,6 +202,8 @@ void COF2Tether::Update( const Vector &vecStart, const Vector &vecEnd )
 	while ( UnwrapEnd( TETHER_END ) )
 	{
 	}
+
+	SlidePivots();
 }
 
 //-----------------------------------------------------------------------------
@@ -211,24 +217,25 @@ void COF2Tether::WrapEnd( OF2TetherEnd_t end, const Vector &vecOld )
 	for ( int i = 0; i < 4 && m_nPivots < OF2_TETHER_MAX_PIVOTS; i++ )
 	{
 		Vector vecFixed = GetNearestPoint( end );
-		Vector vecPivot, vecOut;
-		if ( !FindPivot( vecFixed, vecMoving, vecOld, &vecPivot, &vecOut ) )
+		Vector vecPivot, vecOut, vecEdge;
+		if ( !FindPivot( vecFixed, vecMoving, vecOld, &vecPivot, &vecOut, &vecEdge ) )
 			return;
 
 		// No row of pivots along a curved surface
 		if ( m_nPivots > 0 && vecPivot.DistTo( vecFixed ) < of2_tether_pivot_mindist.GetFloat() )
 			return;
 
-		InsertPivot( ( end == TETHER_START ) ? 0 : m_nPivots, vecPivot, vecOut );
+		InsertPivot( ( end == TETHER_START ) ? 0 : m_nPivots, vecPivot, vecOut, vecEdge );
 	}
 }
 
 //-----------------------------------------------------------------------------
 // If the line from vecFixed to vecMoving is blocked, works out the pivot that
 // takes it around: just off the edge the line touched first as its moving end
-// came from vecMovingOld. pOut is the direction away from that corner.
+// came from vecMovingOld. pOut is the direction away from that corner, pEdge
+// the direction the edge runs in (zero if that can't be told).
 //-----------------------------------------------------------------------------
-bool COF2Tether::FindPivot( const Vector &vecFixed, const Vector &vecMoving, const Vector &vecMovingOld, Vector *pPivot, Vector *pOut ) const
+bool COF2Tether::FindPivot( const Vector &vecFixed, const Vector &vecMoving, const Vector &vecMovingOld, Vector *pPivot, Vector *pOut, Vector *pEdge ) const
 {
 	trace_t tr;
 	if ( !IsBlocked( vecFixed, vecMoving, &tr ) )
@@ -274,12 +281,21 @@ bool COF2Tether::FindPivot( const Vector &vecFixed, const Vector &vecMoving, con
 	// its other end hits the second face, if it comes out right by the first hit.
 	// Failing that (a thin plate, or the hit isn't at an edge), go back around
 	// the edge the way the line came.
+	// The edge runs along both faces. With only one of them known, it lies in
+	// that one, across the way the line came.
 	Vector vecOut = tr.plane.normal + vecSide;
+	Vector vecEdge = CrossProduct( tr.plane.normal, vecSide );
 	if ( IsBlocked( vecBlocked, vecFixed, &trTest ) &&
 		 trTest.endpos.DistToSqr( tr.endpos ) < TETHER_EDGE_DIST * TETHER_EDGE_DIST &&
 		 fabs( DotProduct( trTest.plane.normal, tr.plane.normal ) ) < 0.9f )
 	{
 		vecOut = tr.plane.normal + trTest.plane.normal;
+		vecEdge = CrossProduct( tr.plane.normal, trTest.plane.normal );
+	}
+
+	if ( VectorNormalize( vecEdge ) < 0.01f )
+	{
+		vecEdge.Init();
 	}
 
 	Vector vecPivot = tr.endpos + vecOut * of2_tether_pivot_offset.GetFloat();
@@ -293,6 +309,7 @@ bool COF2Tether::FindPivot( const Vector &vecFixed, const Vector &vecMoving, con
 
 	*pPivot = vecPivot;
 	*pOut = vecOut;
+	*pEdge = vecEdge;
 	return true;
 }
 
@@ -350,7 +367,123 @@ bool COF2Tether::UnwrapEnd( OF2TetherEnd_t end )
 	return true;
 }
 
-void COF2Tether::InsertPivot( int iPivot, const Vector &vecPivot, const Vector &vecOut )
+//-----------------------------------------------------------------------------
+// How hard the line pulls a pivot at vecPivot along its edge: the two runs
+// either side of it each pull their way, and what is left over along the edge
+// drags it. Nothing when it leaves the edge at the same angle on both sides,
+// which is also where the line is shortest. -2 to 2.
+//-----------------------------------------------------------------------------
+static float TetherSlidePull( const Vector &vecPivot, const Vector &vecPrev, const Vector &vecNext, const Vector &vecEdge )
+{
+	Vector vecToPrev = vecPrev - vecPivot;
+	Vector vecToNext = vecNext - vecPivot;
+	VectorNormalize( vecToPrev );
+	VectorNormalize( vecToNext );
+
+	return DotProduct( vecToPrev + vecToNext, vecEdge );
+}
+
+//-----------------------------------------------------------------------------
+// A line pulled tight over an edge doesn't stay where it first touched it: it
+// slips along the edge until it pulls on it evenly. Each pivot is moved along
+// its edge that way, faster the more lopsided the pull, as long as nothing is
+// in the way. How readily is the owner's to say (SetSliding): a rope slips
+// more easily than something sticky. A pivot pulled past the end of its edge
+// comes off it.
+//-----------------------------------------------------------------------------
+void COF2Tether::SlidePivots( void )
+{
+	float flSpeed = m_flSlideSpeed;
+	if ( flSpeed <= 0.0f )
+		return;
+
+	float flFriction = MAX( m_flSlideFriction, 0.0f );
+	float flOffset = of2_tether_pivot_offset.GetFloat();
+
+	for ( int i = 0; i < m_nPivots; i++ )
+	{
+		const Vector vecEdge = m_vecPivotEdge[i];
+		if ( vecEdge.LengthSqr() < 0.5f )
+			continue;
+
+		const Vector vecPivot = m_vecPivots[i];
+		const Vector vecPrev = GetPoint( i );
+		const Vector vecNext = GetPoint( i + 2 );
+
+		float flPull = TetherSlidePull( vecPivot, vecPrev, vecNext, vecEdge );
+		if ( fabs( flPull ) <= flFriction )
+			continue;
+
+		float flStep = ( flPull - ( ( flPull > 0.0f ) ? flFriction : -flFriction ) ) * flSpeed * TICK_INTERVAL;
+
+		// Not past the place where the pull evens out
+		if ( TetherSlidePull( vecPivot + vecEdge * flStep, vecPrev, vecNext, vecEdge ) * flPull < 0.0f )
+		{
+			float flNear = 0.0f;
+			float flFar = flStep;
+			for ( int k = 0; k < 6; k++ )
+			{
+				float flMid = ( flNear + flFar ) * 0.5f;
+				if ( TetherSlidePull( vecPivot + vecEdge * flMid, vecPrev, vecNext, vecEdge ) * flPull < 0.0f )
+				{
+					flFar = flMid;
+				}
+				else
+				{
+					flNear = flMid;
+				}
+			}
+			flStep = flNear;
+		}
+
+		if ( fabs( flStep ) < 0.02f )
+			continue;
+
+		Vector vecTo = vecPivot + vecEdge * flStep;
+
+		// Something across the edge (it ends at a wall)
+		trace_t tr;
+		if ( IsBlocked( vecPivot, vecTo, &tr ) || tr.startsolid )
+			continue;
+
+		// The edge has to be there still: straight back in from the pivot is
+		// the corner it stands off. If it isn't, the pivot has been pulled off
+		// the end of its edge. With nothing else in the line's way it just
+		// goes. Otherwise the line swings round off the end and onto whatever
+		// it meets first, which is found the way any new pivot is, by taking
+		// the line's far end from out past the edge's end to where it really
+		// is. Failing that too, it stays where it is.
+		if ( !IsBlocked( vecTo, vecTo - m_vecPivotOut[i] * ( flOffset * 2.0f + 2.0f ), &tr ) )
+		{
+			trace_t trBack;
+			if ( !IsBlocked( vecPrev, vecNext, &tr ) && !tr.startsolid && !IsBlocked( vecNext, vecPrev, &trBack ) && !trBack.startsolid )
+			{
+				RemovePivot( i );
+				i--;
+				continue;
+			}
+
+			Vector vecNew, vecNewOut, vecNewEdge;
+			if ( FindPivot( vecPrev, vecNext, vecTo, &vecNew, &vecNewOut, &vecNewEdge ) &&
+				 vecNew.DistToSqr( vecPivot ) > 1.0f &&
+				 !IsBlocked( vecPrev, vecNew, &tr ) && !IsBlocked( vecNew, vecNext, &tr ) )
+			{
+				m_vecPivots[i] = vecNew;
+				m_vecPivotOut[i] = vecNewOut;
+				m_vecPivotEdge[i] = vecNewEdge;
+			}
+			continue;
+		}
+
+		// ...and the line has to get to the pivot and away from it
+		if ( IsBlocked( vecPrev, vecTo, &tr ) || IsBlocked( vecTo, vecNext, &tr ) )
+			continue;
+
+		m_vecPivots[i] = vecTo;
+	}
+}
+
+void COF2Tether::InsertPivot( int iPivot, const Vector &vecPivot, const Vector &vecOut, const Vector &vecEdge )
 {
 	Assert( m_nPivots < OF2_TETHER_MAX_PIVOTS && iPivot <= m_nPivots );
 
@@ -358,10 +491,12 @@ void COF2Tether::InsertPivot( int iPivot, const Vector &vecPivot, const Vector &
 	{
 		m_vecPivots[i] = m_vecPivots[i - 1];
 		m_vecPivotOut[i] = m_vecPivotOut[i - 1];
+		m_vecPivotEdge[i] = m_vecPivotEdge[i - 1];
 	}
 
 	m_vecPivots[iPivot] = vecPivot;
 	m_vecPivotOut[iPivot] = vecOut;
+	m_vecPivotEdge[iPivot] = vecEdge;
 	m_nPivots++;
 }
 
@@ -374,6 +509,7 @@ void COF2Tether::RemovePivot( int iPivot )
 	{
 		m_vecPivots[i] = m_vecPivots[i + 1];
 		m_vecPivotOut[i] = m_vecPivotOut[i + 1];
+		m_vecPivotEdge[i] = m_vecPivotEdge[i + 1];
 	}
 }
 

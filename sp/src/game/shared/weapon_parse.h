@@ -156,6 +156,11 @@ public:
 	QAngle					m_angViewmodelOffset;
 	// ("viewmodel_scale", 1 if missing)
 	float					m_flViewmodelScale;
+	// How much of HL2's pitch shift the viewmodel takes: looking down pulls it back and up,
+	// looking up pushes it away ("viewmodel_pitch_shift", 1 if missing, 0 for none)
+	float					m_flViewmodelPitchShift;
+	// Zoomed, the screen shows a sniper scope and no viewmodel ("scope_overlay", client\hl2\hud_scope.cpp)
+	bool					m_bScopeOverlay;
 
 // CLIENT DLL
 	// Sprite data, read from the data file

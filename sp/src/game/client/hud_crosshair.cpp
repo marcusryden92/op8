@@ -232,6 +232,13 @@ bool CHudCrosshair::ShouldDraw( void )
 	if ( pWeapon && !pWeapon->ShouldDrawCrosshair() )
 		return false;
 
+#ifdef HL2_EPISODIC
+	// OF2: the sniper scope's lines are the crosshair (hl2\hud_scope.cpp)
+	extern bool OF2_IsScopeView( void );
+	if ( OF2_IsScopeView() )
+		return false;
+#endif
+
 #ifdef PORTAL
 	C_Portal_Player *portalPlayer = ToPortalPlayer(pPlayer);
 	if ( portalPlayer && portalPlayer->IsSuppressingCrosshair() )

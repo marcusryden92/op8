@@ -1365,6 +1365,32 @@ static Vector TetherHoldOffset( CBasePlayer *pPlayer, const QAngle &angEyes, boo
 		+ vecForward * of2_tether_hold_forward.GetFloat() - vecRight * of2_tether_hold_left.GetFloat();
 }
 
+//-----------------------------------------------------------------------------
+// The hold point sticks out of the player's box, so turning next to a wall
+// would put it in the wall, and the tether with it: it caught on the wall
+// there. So it is kept clear of the world, as if it had a small ball around
+// it that only the world and static props stop: pushed out from inside the
+// player (vecFrom) to where it belongs, it stops where the ball does.
+//-----------------------------------------------------------------------------
+static ConVar of2_tether_hold_clear( "of2_tether_hold_clear", "4", FCVAR_REPLICATED, "The point a tether is held by keeps this far off walls. 0: it goes where it goes, into them too." );
+
+static Vector TetherClearHold( const Vector &vecFrom, const Vector &vecHold )
+{
+	float flClear = of2_tether_hold_clear.GetFloat();
+	if ( flClear <= 0.0f )
+		return vecHold;
+
+	Vector vecSize( flClear, flClear, flClear );
+	CTraceFilterWorldAndPropsOnly filter;
+
+	trace_t tr;
+	UTIL_TraceHull( vecFrom, vecHold, -vecSize, vecSize, MASK_SOLID_BRUSHONLY, &filter, &tr );
+	if ( tr.startsolid )
+		return vecHold;
+
+	return tr.endpos;
+}
+
 Vector OF2_TetherHoldPos( CBasePlayer *pPlayer, bool bAtWeapon )
 {
 	QAngle angEyes;
@@ -1374,7 +1400,10 @@ Vector OF2_TetherHoldPos( CBasePlayer *pPlayer, bool bAtWeapon )
 	angEyes = pPlayer->EyeAngles();
 #endif
 
-	return ( bAtWeapon ? pPlayer->EyePosition() : pPlayer->GetAbsOrigin() ) + TetherHoldOffset( pPlayer, angEyes, bAtWeapon );
+	Vector vecBase = bAtWeapon ? pPlayer->EyePosition() : pPlayer->GetAbsOrigin();
+	Vector vecFrom = bAtWeapon ? vecBase : vecBase + Vector( 0, 0, OF2_TetherHandHeight( pPlayer ) );
+
+	return TetherClearHold( vecFrom, vecBase + TetherHoldOffset( pPlayer, angEyes, bAtWeapon ) );
 }
 
 //-----------------------------------------------------------------------------
@@ -1385,12 +1414,15 @@ Vector CHL2GameMovement::TetherHandOffset( void )
 	bool bAtWeapon = GetHL2Player()->m_HL2Local.m_bTetherAtWeapon;
 
 	Vector vecOffset = TetherHoldOffset( player, mv->m_vecViewAngles, bAtWeapon );
+	Vector vecFrom( 0, 0, OF2_TetherHandHeight( player ) );
 	if ( bAtWeapon )
 	{
 		vecOffset += player->GetViewOffset();
+		vecFrom = player->GetViewOffset();
 	}
 
-	return vecOffset;
+	// (kept off walls, as OF2_TetherHoldPos does)
+	return TetherClearHold( mv->GetAbsOrigin() + vecFrom, mv->GetAbsOrigin() + vecOffset ) - mv->GetAbsOrigin();
 }
 
 void CHL2GameMovement::FullWalkMove()

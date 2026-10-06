@@ -195,12 +195,13 @@ void CBaseHLBludgeonWeapon::Hit( trace_t &traceHit, Activity nHitActivity, bool 
 			info.AdjustPlayerDamageInflictedForSkillLevel();
 		}
 
-		CalculateMeleeDamageForce( &info, hitDirection, traceHit.endpos );
+		// OF2: the weapon can scale the push
+		CalculateMeleeDamageForce( &info, hitDirection, traceHit.endpos, GetDamageForceScale() );
 
-		pHitEntity->DispatchTraceAttack( info, hitDirection, &traceHit ); 
+		pHitEntity->DispatchTraceAttack( info, hitDirection, &traceHit );
 		ApplyMultiDamage();
 
-		// Now hit all triggers along the ray that... 
+		// Now hit all triggers along the ray that...
 		TraceAttackToTriggers( info, traceHit.startpos, traceHit.endpos, hitDirection );
 
 		if ( ToBaseCombatCharacter( pHitEntity ) )

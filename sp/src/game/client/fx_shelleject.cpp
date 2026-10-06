@@ -42,6 +42,17 @@ void RifleShellEjectCallback( const CEffectData &data )
 DECLARE_CLIENT_EFFECT( "RifleShellEject", RifleShellEjectCallback );
 
 //-----------------------------------------------------------------------------
+// Purpose: OF2: Counter-Strike: Source's name for the AWP's shell. The K98
+//			viewmodel (an AWP replacement) asks for it when the bolt comes back.
+//-----------------------------------------------------------------------------
+void OF2_EjectBrass338MagCallback( const CEffectData &data )
+{
+	RifleShellEjectCallback( data );
+}
+
+DECLARE_CLIENT_EFFECT( "EjectBrass_338Mag", OF2_EjectBrass338MagCallback );
+
+//-----------------------------------------------------------------------------
 // Purpose: 
 //-----------------------------------------------------------------------------
 void ShotgunShellEjectCallback( const CEffectData &data )

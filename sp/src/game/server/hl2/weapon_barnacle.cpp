@@ -132,6 +132,8 @@ ConVar of2_barnacle_sag( "of2_barnacle_sag", "0.1", FCVAR_NONE, "How much the we
 ConVar of2_barnacle_spacing( "of2_barnacle_spacing", "20", FCVAR_NONE, "The loose part of the Barnacle's tongue is simulated as a point about every this much of its length (up to 48 points), so it is as stiff and hangs the same way whether it is short or long. Smaller is suppler." );
 ConVar of2_barnacle_settle_speed( "of2_barnacle_settle_speed", "300", FCVAR_NONE, "The Barnacle's tongue is thrown out along the arc its tip flies, which is longer than the straight line to where the tip ends up. Once the throw is over that slack is taken up at this speed." );
 ConVar of2_barnacle_drape( "of2_barnacle_drape", "1", FCVAR_NONE, "The length of the Barnacle's tongue lies on and drapes over loose physics objects, as it does over the world. 0: only over the world." );
+ConVar of2_barnacle_slide_speed( "of2_barnacle_slide_speed", "120", FCVAR_NONE, "Where the Barnacle's tongue goes over an edge it slides along the edge, towards where it pulls on it evenly. This is its speed at the hardest pull. 0: it stays where it first touched." );
+ConVar of2_barnacle_slide_friction( "of2_barnacle_slide_friction", "0.35", FCVAR_NONE, "How sticky the Barnacle's tongue is on an edge: how lopsided the pull has to be before it slides along it (0 always, 1 only when dragged almost straight along it). A climb rope has its own, lower." );
 ConVar of2_barnacle_auto_release( "of2_barnacle_auto_release", "1", FCVAR_NONE, "The Barnacle takes its tongue back by itself once the player stands on the ground and has reeled in all there is to reel." );
 ConVar of2_barnacle_debug( "of2_barnacle_debug", "0", FCVAR_NONE, "Draw the Barnacle's tongue as debug overlays: its line and bends, its points, and what it holds." );
 
@@ -1938,6 +1940,8 @@ void CWeaponBarnacle::TongueThink( void )
 	}
 
 	CheckTip();
+
+	m_Tether.SetSliding( of2_barnacle_slide_speed.GetFloat(), of2_barnacle_slide_friction.GetFloat() );
 
 	// The player let go of a tongue they hung from (jumped off, was teleported)
 	if ( m_iTip == TIP_ANCHORED && ( !pPlayer->IsOnTether() || pPlayer->GetTetherOwner() != this ) )

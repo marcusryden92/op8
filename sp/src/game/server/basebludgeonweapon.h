@@ -53,6 +53,8 @@ public:
 #ifdef MAPBASE
 	virtual int		GetDamageType() { return DMG_CLUB; }
 	virtual float	GetHitDelay() { return 0.f; }
+	// OF2: scales the push a hit gives, which otherwise goes by the damage (CalculateMeleeDamageForce)
+	virtual float	GetDamageForceScale() { return 1.0f; }
 	virtual bool	CanHolster(void);
 #endif // MAPBASE
 
