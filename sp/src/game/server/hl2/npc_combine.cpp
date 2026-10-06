@@ -29,6 +29,8 @@
 #include "weapon_physcannon.h"
 #include "SoundEmitterSystem/isoundemittersystembase.h"
 #include "npc_headcrab.h"
+#include "ai_network.h"	// OF2
+#include "ai_node.h"
 #ifdef MAPBASE
 #include "mapbase/GlobalStrings.h"
 #include "globalstate.h"
@@ -48,7 +50,10 @@ ConVar npc_combine_altfire_not_allies_only( "npc_combine_altfire_not_allies_only
 
 ConVar npc_combine_new_cover_behavior( "npc_combine_new_cover_behavior", "1", FCVAR_NONE, "Mapbase: Toggles small patches for parts of npc_combine AI related to soldiers failing to take cover. These patches are minimal and only change cases where npc_combine would otherwise look at an enemy without shooting or run up to the player to melee attack when they don't have to. Consult the Mapbase wiki for more information." );
 
-ConVar npc_combine_fixed_shootpos( "npc_combine_fixed_shootpos", "0", FCVAR_NONE, "Mapbase: Toggles fixed Combine soldier shoot position." );
+// OF2: Stealth. The rest of its convars are in of2_stealth.cpp.
+ConVar of2_stealth_dark_soldier( "of2_stealth_dark_soldier", "1.0", FCVAR_NONE, "Stealth: how fast soldiers and elites make out a player in complete darkness, against one in the light. 1: they have night vision, light makes no difference. 0: they cannot see into the dark at all." );
+
+ConVar npc_combine_fixed_shootpos("npc_combine_fixed_shootpos", "0", FCVAR_NONE, "Mapbase: Toggles fixed Combine soldier shoot position." );
 #endif
 
 #define COMBINE_SKIN_DEFAULT		0
@@ -245,6 +250,12 @@ DEFINE_FIELD( m_vecAltFireTarget, FIELD_VECTOR ),
 DEFINE_KEYFIELD( m_iTacticalVariant, FIELD_INTEGER, "tacticalvariant" ),
 DEFINE_KEYFIELD( m_iPathfindingVariant, FIELD_INTEGER, "pathfindingvariant" ),
 
+// OF2: Stealth
+DEFINE_EMBEDDED( m_Stealth ),
+DEFINE_KEYFIELD( m_bStealthDisabled, FIELD_BOOLEAN, "of2_nostealth" ),
+DEFINE_INPUTFUNC( FIELD_VOID,	"EnableStealth",	InputEnableStealth ),
+DEFINE_INPUTFUNC( FIELD_VOID,	"DisableStealth",	InputDisableStealth ),
+
 END_DATADESC()
 
 
@@ -254,6 +265,10 @@ END_DATADESC()
 CNPC_Combine::CNPC_Combine()
 {
 	m_vecTossVelocity = vec3_origin;
+
+	// OF2
+	m_Stealth.Init( this );
+	m_bStealthDisabled = false;
 }
 
 
@@ -290,6 +305,22 @@ void CNPC_Combine::InputLookOn( inputdata_t &inputdata )
 
 //-----------------------------------------------------------------------------
 // Purpose: 
+//-----------------------------------------------------------------------------
+void CNPC_Combine::InputEnableStealth( inputdata_t &inputdata )
+{
+	m_bStealthDisabled = false;	// OF2
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: OF2: Back to stock for this soldier: sees the player at once
+//-----------------------------------------------------------------------------
+void CNPC_Combine::InputDisableStealth( inputdata_t &inputdata )
+{
+	m_bStealthDisabled = true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
 //-----------------------------------------------------------------------------
 void CNPC_Combine::InputStartPatrolling( inputdata_t &inputdata )
 {
@@ -543,6 +574,15 @@ void CNPC_Combine::PostNPCInit()
 void CNPC_Combine::GatherConditions()
 {
 	BaseClass::GatherConditions();
+
+	// OF2: Stealth. Soldiers that only react to a spotlight (no look) are left alone.
+	m_Stealth.SetDisabled( m_bStealthDisabled || HasSpawnFlags( SF_COMBINE_NO_LOOK ) );
+	m_Stealth.SetVision( of2_stealth_dark_soldier.GetFloat(), true );
+	m_Stealth.Update();
+	if ( m_Stealth.HasChanged() )
+	{
+		SetCondition( COND_COMBINE_STEALTH_STIMULUS );
+	}
 
 	ClearCondition( COND_COMBINE_ATTACK_SLOT_AVAILABLE );
 
@@ -1233,7 +1273,16 @@ void CNPC_Combine::StartTask( const Task_t *pTask )
 		}
 		break;
 
-	default: 
+	// OF2: Stealth
+	case TASK_COMBINE_STEALTH_FACE_STIMULUS:		if ( m_Stealth.StartTask( STEALTH_TASK_FACE_STIMULUS ) ) ChainStartTask( TASK_FACE_IDEAL );			break;
+	case TASK_COMBINE_STEALTH_LOOKED:				m_Stealth.StartTask( STEALTH_TASK_LOOKED );					break;
+	case TASK_COMBINE_STEALTH_GET_PATH_TO_STIMULUS:	m_Stealth.StartTask( STEALTH_TASK_GET_PATH_TO_STIMULUS );	break;
+	case TASK_COMBINE_STEALTH_ARRIVED:				m_Stealth.StartTask( STEALTH_TASK_ARRIVED );				break;
+	case TASK_COMBINE_STEALTH_GET_SEARCH_PATH:		m_Stealth.StartTask( STEALTH_TASK_GET_SEARCH_PATH );		break;
+	case TASK_COMBINE_STEALTH_GET_PATH_HOME:		m_Stealth.StartTask( STEALTH_TASK_GET_PATH_HOME );			break;
+	case TASK_COMBINE_STEALTH_FACE_HOME:			if ( m_Stealth.StartTask( STEALTH_TASK_FACE_HOME ) ) ChainStartTask( TASK_FACE_IDEAL );				break;
+
+	default:
 		BaseClass:: StartTask( pTask );
 		break;
 	}
@@ -1269,6 +1318,12 @@ void CNPC_Combine::RunTask( const Task_t *pTask )
 	{
 	case TASK_COMBINE_CHASE_ENEMY_CONTINUOUSLY:
 		RunTaskChaseEnemyContinuously( pTask );
+		break;
+
+	// OF2: Stealth
+	case TASK_COMBINE_STEALTH_FACE_STIMULUS:
+	case TASK_COMBINE_STEALTH_FACE_HOME:
+		ChainRunTask( TASK_FACE_IDEAL );
 		break;
 
 	case TASK_COMBINE_SIGNAL_BEST_SOUND:
@@ -1498,7 +1553,93 @@ bool CNPC_Combine::UpdateEnemyMemory( CBaseEntity *pEnemy, const Vector &positio
 		return false;
 	}
 
+	// OF2: Stealth. A squadmate sees the player and this soldier is not in the fight yet:
+	// somewhere to go and look, not knowledge of where the player is.
+	if ( m_Stealth.TakeEnemyReport( pEnemy, position, pInformer ) )
+	{
+		return false;
+	}
+
+	if ( pEnemy && pEnemy->IsPlayer() )
+	{
+		m_Stealth.EnemyUpdated();
+	}
+
 	return BaseClass::UpdateEnemyMemory( pEnemy, position, pInformer );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: OF2: Stealth. The player is not seen until the soldier is sure of
+//			what it is looking at.
+//-----------------------------------------------------------------------------
+bool CNPC_Combine::QuerySeeEntity( CBaseEntity *pEntity, bool bOnlyHateOrFearIfNPC )
+{
+	if ( !BaseClass::QuerySeeEntity( pEntity, bOnlyHateOrFearIfNPC ) )
+		return false;
+
+	if ( pEntity->IsPlayer() )
+	{
+		return m_Stealth.SeePlayer( static_cast<CBasePlayer *>( pEntity ), of2_stealth_dark_soldier.GetFloat() );
+	}
+
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: OF2: Stealth. Being hurt by the player ends any doubt about them.
+//-----------------------------------------------------------------------------
+int CNPC_Combine::OnTakeDamage_Alive( const CTakeDamageInfo &info )
+{
+	// After the base class: it works out g_vecAttackDir
+	int iResult = BaseClass::OnTakeDamage_Alive( info );
+
+	if ( IsAlive() )
+	{
+		m_Stealth.TookDamage( info.GetAttacker() );
+	}
+
+	return iResult;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: OF2: Stealth. What was heard counts as evidence.
+//-----------------------------------------------------------------------------
+void CNPC_Combine::OnListened()
+{
+	BaseClass::OnListened();
+
+	m_Stealth.HearSounds();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: OF2: Stealth. What to do about evidence that is not an enemy yet.
+//			SCHED_NONE: nothing, carry on as stock.
+//-----------------------------------------------------------------------------
+int CNPC_Combine::SelectStealthSchedule( void )
+{
+	ClearCondition( COND_COMBINE_STEALTH_STIMULUS );
+
+	switch ( m_Stealth.SelectSchedule( m_bShouldPatrol || m_AssaultBehavior.HasAssaultCue() ) )
+	{
+	case STEALTH_SCHED_LOOK:
+		return SCHED_COMBINE_STEALTH_LOOK;
+
+	case STEALTH_SCHED_INVESTIGATE:
+		// Stock, a soldier that has lost its enemy wanders about from then on.
+		// The search is in place of that.
+		ClearCondition( COND_COMBINE_SHOULD_PATROL );
+		AlertSound();
+		return SCHED_COMBINE_STEALTH_INVESTIGATE;
+
+	case STEALTH_SCHED_SEARCH:
+		ClearCondition( COND_COMBINE_SHOULD_PATROL );
+		return SCHED_COMBINE_STEALTH_SEARCH;
+
+	case STEALTH_SCHED_RETURN:
+		return SCHED_COMBINE_STEALTH_RETURN;
+	}
+
+	return SCHED_NONE;
 }
 
 
@@ -1517,6 +1658,28 @@ void CNPC_Combine::BuildScheduleTestBits( void )
 	}
 
 	SetCustomInterruptCondition( COND_COMBINE_HIT_BY_BUGBAIT );
+
+	// OF2: Stealth. New evidence breaks into standing about and patrolling
+	// (the stealth schedules list it themselves).
+	if ( !GetEnemy() && m_Stealth.IsEnabled() && ( m_NPCState == NPC_STATE_IDLE || m_NPCState == NPC_STATE_ALERT ) )
+	{
+		static const int stealthInterrupted[] =
+		{
+			SCHED_IDLE_STAND, SCHED_IDLE_WALK, SCHED_IDLE_WANDER, SCHED_PATROL_WALK,
+			SCHED_ALERT_STAND, SCHED_ALERT_FACE, SCHED_ALERT_FACE_BESTSOUND, SCHED_ALERT_SCAN, SCHED_ALERT_WALK,
+			SCHED_INVESTIGATE_SOUND, SCHED_COMBINE_PATROL,
+		};
+
+		for ( int i = 0; i < ARRAYSIZE( stealthInterrupted ); i++ )
+		{
+			// As selected, or as it came out of translation
+			if ( IsCurSchedule( stealthInterrupted[i], true ) || IsCurSchedule( stealthInterrupted[i], false ) )
+			{
+				SetCustomInterruptCondition( COND_COMBINE_STEALTH_STIMULUS );
+				break;
+			}
+		}
+	}
 
 	if ( !IsCurSchedule( SCHED_COMBINE_BURNING_STAND ) )
 	{
@@ -1681,6 +1844,10 @@ bool CNPC_Combine::QueryHearSound( CSound *pSound )
 		return true;
 
 	if ( pSound->SoundContext() & SOUND_CONTEXT_EXCLUDE_COMBINE )
+		return false;
+
+	// OF2: Stealth. The player's own sounds carry less far, and through walls less again.
+	if ( pSound->IsSoundType( SOUND_PLAYER ) && m_Stealth.IsEnabled() && !m_Stealth.CanHearPlayerSound( pSound ) )
 		return false;
 
 	return BaseClass::QueryHearSound( pSound );
@@ -1972,6 +2139,14 @@ int CNPC_Combine::SelectCombatSchedule()
 	if ( attackSchedule != SCHED_NONE )
 		return attackSchedule;
 
+	// OF2: Stealth. Cannot see them, but knows where they were a moment ago (saw them go
+	// behind something, heard the shot): fire at that. The aim is at the last known position
+	// already; stock only never pulls the trigger without the enemy in sight.
+	if ( m_Stealth.ShouldSuppressLKP() && OccupyStrategySlotRange( SQUAD_SLOT_ATTACK1, SQUAD_SLOT_ATTACK2 ) )
+	{
+		return SCHED_COMBINE_SUPPRESS;
+	}
+
 	if (HasCondition(COND_ENEMY_OCCLUDED))
 	{
 		// stand up, just in case
@@ -2172,6 +2347,11 @@ int CNPC_Combine::SelectSchedule( void )
 			return BaseClass::SelectSchedule();
 		}
 	}
+
+	// OF2: Stealth. Something to look at or look for, short of an enemy.
+	nSched = SelectStealthSchedule();
+	if ( nSched != SCHED_NONE )
+		return nSched;
 
 	switch	( m_NPCState )
 	{
@@ -4009,6 +4189,14 @@ DECLARE_TASK( TASK_COMBINE_DIE_INSTANTLY )
 DECLARE_TASK( TASK_COMBINE_PLAY_SEQUENCE_FACE_ALTFIRE_TARGET )
 DECLARE_TASK( TASK_COMBINE_GET_PATH_TO_FORCED_GREN_LOS )
 DECLARE_TASK( TASK_COMBINE_SET_STANDING )
+// OF2: Stealth
+DECLARE_TASK( TASK_COMBINE_STEALTH_FACE_STIMULUS )
+DECLARE_TASK( TASK_COMBINE_STEALTH_LOOKED )
+DECLARE_TASK( TASK_COMBINE_STEALTH_GET_PATH_TO_STIMULUS )
+DECLARE_TASK( TASK_COMBINE_STEALTH_ARRIVED )
+DECLARE_TASK( TASK_COMBINE_STEALTH_GET_SEARCH_PATH )
+DECLARE_TASK( TASK_COMBINE_STEALTH_GET_PATH_HOME )
+DECLARE_TASK( TASK_COMBINE_STEALTH_FACE_HOME )
 
 //Activities
 #if !SHARED_COMBINE_ACTIVITIES
@@ -4040,6 +4228,7 @@ DECLARE_CONDITION( COND_COMBINE_HIT_BY_BUGBAIT )
 DECLARE_CONDITION( COND_COMBINE_DROP_GRENADE )
 DECLARE_CONDITION( COND_COMBINE_ON_FIRE )
 DECLARE_CONDITION( COND_COMBINE_ATTACK_SLOT_AVAILABLE )
+DECLARE_CONDITION( COND_COMBINE_STEALTH_STIMULUS )	// OF2
 
 DECLARE_INTERACTION( g_interactionCombineBash );
 
@@ -4760,6 +4949,185 @@ DEFINE_SCHEDULE
  "		COND_NEW_ENEMY"
  "		COND_ENEMY_DEAD"
  "		COND_CAN_MELEE_ATTACK1"
+ )
+
+ //=========================================================
+ // OF2: Stealth (of2_stealth.h). None of these has an enemy.
+ //
+ // SCHED_COMBINE_STEALTH_LOOK
+ //
+ //	Suspicious: stop, turn to it, watch for a while.
+ //=========================================================
+ DEFINE_SCHEDULE
+ (
+ SCHED_COMBINE_STEALTH_LOOK,
+
+ "	Tasks"
+ "		TASK_STOP_MOVING						0"
+ "		TASK_COMBINE_STEALTH_FACE_STIMULUS		0"
+ "		TASK_SET_ACTIVITY						ACTIVITY:ACT_IDLE"
+ "		TASK_WAIT								2"
+ "		TASK_WAIT_RANDOM						2"
+ "		TASK_COMBINE_STEALTH_LOOKED				0"
+ ""
+ "	Interrupts"
+ "		COND_NEW_ENEMY"
+ "		COND_LIGHT_DAMAGE"
+ "		COND_HEAVY_DAMAGE"
+ "		COND_HEAR_DANGER"
+ "		COND_HEAR_MOVE_AWAY"
+ "		COND_COMBINE_STEALTH_STIMULUS"
+ )
+
+ //=========================================================
+ // SCHED_COMBINE_STEALTH_INVESTIGATE
+ //
+ //	Searching: go to where it was, then look left and right.
+ //=========================================================
+ DEFINE_SCHEDULE
+ (
+ SCHED_COMBINE_STEALTH_INVESTIGATE,
+
+ "	Tasks"
+ "		TASK_SET_FAIL_SCHEDULE						SCHEDULE:SCHED_COMBINE_STEALTH_INVESTIGATE_FAILED"
+ "		TASK_STOP_MOVING							0"
+ "		TASK_COMBINE_STEALTH_FACE_STIMULUS			0"
+ "		TASK_WAIT									0.5"
+ "		TASK_COMBINE_STEALTH_GET_PATH_TO_STIMULUS	0"
+ "		TASK_WAIT_FOR_MOVEMENT						0"
+ "		TASK_STOP_MOVING							0"
+ "		TASK_COMBINE_STEALTH_ARRIVED				0"
+ "		TASK_SET_ACTIVITY							ACTIVITY:ACT_IDLE"
+ "		TASK_WAIT									1.5"
+ "		TASK_TURN_LEFT								100"
+ "		TASK_WAIT									1"
+ "		TASK_TURN_RIGHT								200"
+ "		TASK_WAIT									1.5"
+ ""
+ "	Interrupts"
+ "		COND_NEW_ENEMY"
+ "		COND_LIGHT_DAMAGE"
+ "		COND_HEAVY_DAMAGE"
+ "		COND_HEAR_DANGER"
+ "		COND_HEAR_MOVE_AWAY"
+ "		COND_COMBINE_STEALTH_STIMULUS"
+ )
+
+ //=========================================================
+ // SCHED_COMBINE_STEALTH_INVESTIGATE_FAILED
+ //
+ //	No way there: watch it from here, then search around.
+ //=========================================================
+ DEFINE_SCHEDULE
+ (
+ SCHED_COMBINE_STEALTH_INVESTIGATE_FAILED,
+
+ "	Tasks"
+ "		TASK_STOP_MOVING						0"
+ "		TASK_COMBINE_STEALTH_FACE_STIMULUS		0"
+ "		TASK_COMBINE_STEALTH_ARRIVED			0"
+ "		TASK_SET_ACTIVITY						ACTIVITY:ACT_IDLE"
+ "		TASK_WAIT								3"
+ ""
+ "	Interrupts"
+ "		COND_NEW_ENEMY"
+ "		COND_LIGHT_DAMAGE"
+ "		COND_HEAVY_DAMAGE"
+ "		COND_HEAR_DANGER"
+ "		COND_HEAR_MOVE_AWAY"
+ "		COND_COMBINE_STEALTH_STIMULUS"
+ )
+
+ //=========================================================
+ // SCHED_COMBINE_STEALTH_SEARCH
+ //
+ //	Searching, and there was nothing where it looked: walk
+ //	to somewhere nearby, look about. Picked again until the
+ //	search runs out.
+ //=========================================================
+ DEFINE_SCHEDULE
+ (
+ SCHED_COMBINE_STEALTH_SEARCH,
+
+ "	Tasks"
+ "		TASK_SET_FAIL_SCHEDULE					SCHEDULE:SCHED_COMBINE_STEALTH_SEARCH_FAILED"
+ "		TASK_STOP_MOVING						0"
+ "		TASK_COMBINE_STEALTH_GET_SEARCH_PATH	0"
+ "		TASK_WAIT_FOR_MOVEMENT					0"
+ "		TASK_STOP_MOVING						0"
+ "		TASK_SET_ACTIVITY						ACTIVITY:ACT_IDLE"
+ "		TASK_WAIT								1"
+ "		TASK_TURN_LEFT							120"
+ "		TASK_WAIT								1"
+ "		TASK_WAIT_RANDOM						2"
+ ""
+ "	Interrupts"
+ "		COND_NEW_ENEMY"
+ "		COND_LIGHT_DAMAGE"
+ "		COND_HEAVY_DAMAGE"
+ "		COND_HEAR_DANGER"
+ "		COND_HEAR_MOVE_AWAY"
+ "		COND_COMBINE_STEALTH_STIMULUS"
+ )
+
+ DEFINE_SCHEDULE
+ (
+ SCHED_COMBINE_STEALTH_SEARCH_FAILED,
+
+ "	Tasks"
+ "		TASK_STOP_MOVING						0"
+ "		TASK_SET_ACTIVITY						ACTIVITY:ACT_IDLE"
+ "		TASK_WAIT								1"
+ "		TASK_TURN_LEFT							120"
+ "		TASK_WAIT								2"
+ ""
+ "	Interrupts"
+ "		COND_NEW_ENEMY"
+ "		COND_LIGHT_DAMAGE"
+ "		COND_HEAVY_DAMAGE"
+ "		COND_HEAR_DANGER"
+ "		COND_HEAR_MOVE_AWAY"
+ "		COND_COMBINE_STEALTH_STIMULUS"
+ )
+
+ //=========================================================
+ // SCHED_COMBINE_STEALTH_RETURN
+ //
+ //	Nothing came of it: back to where it stood, facing as before.
+ //=========================================================
+ DEFINE_SCHEDULE
+ (
+ SCHED_COMBINE_STEALTH_RETURN,
+
+ "	Tasks"
+ "		TASK_SET_FAIL_SCHEDULE					SCHEDULE:SCHED_COMBINE_STEALTH_RETURN_FAILED"
+ "		TASK_STOP_MOVING						0"
+ "		TASK_COMBINE_STEALTH_GET_PATH_HOME		0"
+ "		TASK_WAIT_FOR_MOVEMENT					0"
+ "		TASK_STOP_MOVING						0"
+ "		TASK_COMBINE_STEALTH_FACE_HOME			0"
+ ""
+ "	Interrupts"
+ "		COND_NEW_ENEMY"
+ "		COND_LIGHT_DAMAGE"
+ "		COND_HEAVY_DAMAGE"
+ "		COND_HEAR_DANGER"
+ "		COND_HEAR_MOVE_AWAY"
+ "		COND_COMBINE_STEALTH_STIMULUS"
+ )
+
+ DEFINE_SCHEDULE
+ (
+ SCHED_COMBINE_STEALTH_RETURN_FAILED,
+
+ "	Tasks"
+ "		TASK_STOP_MOVING						0"
+ "		TASK_COMBINE_STEALTH_FACE_HOME			0"
+ "		TASK_WAIT								1"
+ ""
+ "	Interrupts"
+ "		COND_NEW_ENEMY"
+ "		COND_COMBINE_STEALTH_STIMULUS"
  )
 
  AI_END_CUSTOM_NPC()

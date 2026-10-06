@@ -1320,7 +1320,14 @@ int CAI_BaseNPC::OnTakeDamage_Alive( const CTakeDamageInfo &info )
 	// ---------------------------------------------------------------
 	//  Insert a combat sound so that nearby NPCs know I've been hit
 	// ---------------------------------------------------------------
+#ifdef HL2_EPISODIC
+	// OF2: Stealth. A knife in the ribs does not carry like a gunshot wound.
+	extern ConVar of2_knife_noise;
+	int iInjuryVolume = ( info.GetDamageCustom() == OF2_DMG_CUSTOM_QUIET ) ? of2_knife_noise.GetInt() : 1024;
+	CSoundEnt::InsertSound( SOUND_COMBAT, GetAbsOrigin(), iInjuryVolume, 0.5, this, SOUNDENT_CHANNEL_INJURY );
+#else
 	CSoundEnt::InsertSound( SOUND_COMBAT, GetAbsOrigin(), 1024, 0.5, this, SOUNDENT_CHANNEL_INJURY );
+#endif
 
 	return 1;
 }
@@ -2505,7 +2512,8 @@ bool CAI_BaseNPC::QueryHearSound( CSound *pSound )
 	}
 #endif
 
-	if ( pSound->IsSoundType( SOUND_PLAYER ) && GetState() == NPC_STATE_IDLE && !FVisible( pSound->GetSoundReactOrigin() ) )
+	// OF2: Not for NPCs that listen for the player (stealth); they have their own, softer rule
+	if ( pSound->IsSoundType( SOUND_PLAYER ) && GetState() == NPC_STATE_IDLE && !OF2_HearsUnseenPlayer() && !FVisible( pSound->GetSoundReactOrigin() ) )
 	{
 		// NPC's that are IDLE should disregard player movement sounds if they can't see them.
 		// This does not affect them hearing the player's weapon.
@@ -12845,6 +12853,7 @@ IMPLEMENT_SERVERCLASS_ST( CAI_BaseNPC, DT_AI_BaseNPC )
 	SendPropInt( SENDINFO( m_iSpeedModSpeed ) ),
 	SendPropBool( SENDINFO( m_bImportanRagdoll ) ),
 	SendPropFloat( SENDINFO( m_flTimePingEffect ) ),
+	SendPropBool( SENDINFO( m_bOF2WantsLight ) ),	// OF2
 END_SEND_TABLE()
 
 //-------------------------------------
@@ -13389,6 +13398,8 @@ CAI_BaseNPC::CAI_BaseNPC(void)
  :	m_UnreachableEnts( 0, 4 ),
     m_bDeferredNavigation( false )
 {
+	m_bOF2WantsLight = false;	// OF2
+
 	m_pMotor = NULL;
 	m_pMoveProbe = NULL;
 	m_pNavigator = NULL;

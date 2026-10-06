@@ -24,6 +24,7 @@
 #include "ai_behavior_police.h"
 #include "ai_behavior_follow.h"
 #include "ai_sentence.h"
+#include "of2_stealth.h"	// OF2
 #ifdef MAPBASE
 #include "mapbase/ai_grenade.h"
 #endif
@@ -137,6 +138,25 @@ public:
 	void	AdministerJustice( void );
 
 	bool	QueryHearSound( CSound *pSound );
+
+	// OF2: Stealth (of2_stealth.h). No night vision: in the dark a cop sees what its flashlight is on.
+	virtual bool	QuerySeeEntity( CBaseEntity *pEntity, bool bOnlyHateOrFearIfNPC = false );
+	virtual void	OnListened();
+	virtual bool	UpdateEnemyMemory( CBaseEntity *pEnemy, const Vector &position, CBaseEntity *pInformer = NULL );
+	virtual bool	FVisible( CBaseEntity *pEntity, int traceMask = MASK_BLOCKLOS, CBaseEntity **ppBlocker = NULL );
+	virtual bool	FVisible( const Vector &vecTarget, int traceMask = MASK_BLOCKLOS, CBaseEntity **ppBlocker = NULL ) { return BaseClass::FVisible( vecTarget, traceMask, ppBlocker ); }
+	virtual bool	OF2_HearsUnseenPlayer( void )	{ return m_Stealth.IsEnabled(); }
+	virtual void	OF2_StealthAlert( const Vector &vecPos )	{ m_Stealth.TakeAlert( vecPos ); }
+	virtual bool	OF2_AcceptsSquadEnemy( CBaseEntity *pEnemy )	{ return m_Stealth.AcceptsSquadEnemy( pEnemy ); }
+	virtual void	UpdateOnRemove( void );
+	virtual void	OF2_SetAmbientLight( float flLight )	{ m_flAmbientLight = flLight; }
+	int		SelectStealthSchedule( void );
+	void	UpdateFlashlight( void );
+	void	SetFlashlight( bool bOn );
+	bool	GetFlashlightRay( Vector *pOrigin, Vector *pForward );
+	void	InputEnableStealth( inputdata_t &inputdata );
+	void	InputDisableStealth( inputdata_t &inputdata );
+	void	InputSetFlashlightMode( inputdata_t &inputdata );
 
 	void	SetBatonState( bool state );
 	bool	BatonActive( void );
@@ -396,6 +416,7 @@ private:
 		COND_METROPOLICE_PLAYER_TOO_CLOSE,
 		COND_METROPOLICE_CHANGE_BATON_STATE,
 		COND_METROPOLICE_PHYSOBJECT_ASSAULT,
+		COND_METROPOLICE_STEALTH_STIMULUS,	// OF2: something new to look into
 
 	};
 
@@ -440,6 +461,15 @@ private:
 		SCHED_METROPOLICE_RANGE_ATTACK2,
 		SCHED_METROPOLICE_AR2_ALTFIRE,
 #endif
+		// OF2: Stealth
+		SCHED_METROPOLICE_STEALTH_LOOK,
+		SCHED_METROPOLICE_STEALTH_INVESTIGATE,
+		SCHED_METROPOLICE_STEALTH_INVESTIGATE_FAILED,
+		SCHED_METROPOLICE_STEALTH_SEARCH,
+		SCHED_METROPOLICE_STEALTH_SEARCH_FAILED,
+		SCHED_METROPOLICE_STEALTH_RETURN,
+		SCHED_METROPOLICE_STEALTH_RETURN_FAILED,
+		SCHED_METROPOLICE_STEALTH_SUPPRESS,
 	};
 
 	enum 
@@ -472,6 +502,14 @@ private:
 		TASK_METROPOLICE_FACE_TOSS_DIR,
 		TASK_METROPOLICE_PLAY_SEQUENCE_FACE_ALTFIRE_TARGET,
 #endif
+		// OF2: Stealth
+		TASK_METROPOLICE_STEALTH_FACE_STIMULUS,
+		TASK_METROPOLICE_STEALTH_LOOKED,
+		TASK_METROPOLICE_STEALTH_GET_PATH_TO_STIMULUS,
+		TASK_METROPOLICE_STEALTH_ARRIVED,
+		TASK_METROPOLICE_STEALTH_GET_SEARCH_PATH,
+		TASK_METROPOLICE_STEALTH_GET_PATH_HOME,
+		TASK_METROPOLICE_STEALTH_FACE_HOME,
 	};
 
 private:
@@ -561,6 +599,18 @@ private:
 	float			m_flLastHitYaw;
 
 	static float	gm_flTimeLastSpokePeek;
+
+	// OF2: Stealth
+	COF2Awareness	m_Stealth;
+	bool			m_bStealthDisabled;		// "of2_nostealth" in the map
+	int				m_iFlashlightMode;		// "of2_flashlight": 0 never, 1 when alerted, 2 always
+	bool			m_bFlashlightOn;
+	float			m_flAmbientLight;		// brightness where it stands, from the client; below 0 until the first report
+	float			m_flFlashlightOffTime;	// stays on this long after calming down
+	EHANDLE			m_hFlashlight;			// the beam (not saved; made again after a load)
+	EHANDLE			m_hFlashlightEnd;		// "spotlight_end": the pool of light where it lands
+	bool			m_bFlashlightOnSpot;	// the beam is on the place it last knew the player to be
+	EHANDLE			m_hFlashlightGlow;		// sprite on the side of the head
 
 public:
 	DEFINE_CUSTOM_AI;

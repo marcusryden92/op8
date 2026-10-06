@@ -1130,6 +1130,16 @@ public:
 	virtual CSound *	GetBestScent( void );
 	virtual float		HearingSensitivity( void )		{ return 1.0;	}
 	virtual bool		ShouldIgnoreSound( CSound * )	{ return false; }
+	// OF2: Stealth (of2_stealth.h). An idle NPC that takes the player's sounds through walls
+	// decides for itself in QueryHearSound() how far they carry.
+	virtual bool		OF2_HearsUnseenPlayer( void )	{ return false; }
+	// OF2: A squadmate is going to look at something there
+	virtual void		OF2_StealthAlert( const Vector &vecPos ) {}
+	// OF2: A squadmate has a new enemy; stock, everyone in the squad without one takes it
+	virtual bool		OF2_AcceptsSquadEnemy( CBaseEntity *pEnemy ) { return true; }
+	// OF2: CTakeDamageInfo::SetDamageCustom() for a quiet weapon (the knife): the hit is heard
+	// only as far as of2_knife_noise, not across the room
+	#define OF2_DMG_CUSTOM_QUIET	0x4F32
 	bool				SoundIsVisible( CSound *pSound );
 
 protected:
@@ -2480,6 +2490,11 @@ public:
 	CNetworkVar( int,   m_iSpeedModRadius );
 	CNetworkVar( int,   m_iSpeedModSpeed );
 	CNetworkVar( float, m_flTimePingEffect );			// Display the pinged effect until this time
+
+	// OF2: Asks the client to report how much light there is where this NPC stands
+	// (client\hl2\c_of2_stealth.cpp); the server has no lighting of its own. Not saved: set every think.
+	CNetworkVar( bool,  m_bOF2WantsLight );
+	virtual void		OF2_SetAmbientLight( float flLight ) {}
 
 	void				InputActivateSpeedModifier( inputdata_t &inputdata ) { m_bSpeedModActive = true; }
 	void				InputDisableSpeedModifier( inputdata_t &inputdata ) { m_bSpeedModActive = false; }

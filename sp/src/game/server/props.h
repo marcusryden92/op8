@@ -384,8 +384,9 @@ class CPhysicsProp : public CBreakableProp
 
 public:
 	~CPhysicsProp();
-	CPhysicsProp( void ) 
+	CPhysicsProp( void )
 	{
+		m_flOF2NextImpactNoise = 0.0f;	// OF2
 	}
 
 	void Spawn( void );
@@ -462,6 +463,8 @@ private:
 
 	bool		m_bThrownByPlayer;
 	bool		m_bFirstCollisionAfterLaunch;
+
+	float		m_flOF2NextImpactNoise;	// OF2: Stealth. Not saved.
 
 protected:
 	CNetworkVar( bool, m_bAwake );

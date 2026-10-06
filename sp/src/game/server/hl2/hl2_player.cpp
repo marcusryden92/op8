@@ -49,6 +49,7 @@
 
 #ifdef HL2_EPISODIC
 #include "npc_alyx_episodic.h"
+#include "of2_stealth.h"	// OF2
 #endif
 
 #ifdef PORTAL
@@ -3585,6 +3586,33 @@ bool CHL2_Player::ClientCommand( const CCommand &args )
 		return true;
 	}
 
+#endif
+
+#ifdef HL2_EPISODIC
+	// OF2: Stealth. The client reports how well lit the player is (c_of2_stealth.cpp).
+	if ( !Q_stricmp( args[0], "of2_vis" ) )
+	{
+		if ( args.ArgC() > 1 )
+		{
+			OF2_SetPlayerVisibility( this, atof( args[1] ) );
+		}
+		return true;
+	}
+
+	// OF2: ...and how bright it is where an NPC that asked stands (CAI_BaseNPC::m_bOF2WantsLight)
+	if ( !Q_stricmp( args[0], "of2_npclight" ) )
+	{
+		if ( args.ArgC() > 2 )
+		{
+			CBaseEntity *pEntity = UTIL_EntityByIndex( atoi( args[1] ) );
+			CAI_BaseNPC *pNPC = pEntity ? pEntity->MyNPCPointer() : NULL;
+			if ( pNPC )
+			{
+				pNPC->OF2_SetAmbientLight( atof( args[2] ) );
+			}
+		}
+		return true;
+	}
 #endif
 
 	if ( !Q_stricmp( args[0], "emit" ) )

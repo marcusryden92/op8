@@ -55,6 +55,8 @@ private:
 	bool m_bFadeCorpse;
 	bool m_bSpeedModActive;
 	bool m_bImportanRagdoll;
+public:
+	bool m_bOF2WantsLight;	// OF2: report the light where it stands to the server (c_of2_stealth.cpp)
 };
 
 

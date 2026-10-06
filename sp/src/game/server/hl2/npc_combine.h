@@ -30,6 +30,7 @@
 //#define CAI_Sentence CAI_SentenceTalker
 #define COMBINE_SOLDIER_USES_RESPONSE_SYSTEM 1
 #endif
+#include "of2_stealth.h"	// OF2
 
 // Used when only what combine to react to what the spotlight sees
 #define SF_COMBINE_NO_LOOK	(1 << 16)
@@ -105,7 +106,21 @@ public:
 	void InputSetPoliceGoal( inputdata_t &inputdata );
 #endif
 
+	// OF2: Stealth
+	void InputEnableStealth( inputdata_t &inputdata );
+	void InputDisableStealth( inputdata_t &inputdata );
+
 	bool			UpdateEnemyMemory( CBaseEntity *pEnemy, const Vector &position, CBaseEntity *pInformer = NULL );
+
+	// OF2: Stealth (of2_stealth.h)
+	virtual bool	QuerySeeEntity( CBaseEntity *pEntity, bool bOnlyHateOrFearIfNPC = false );
+	virtual void	OnListened();
+	virtual bool	OF2_HearsUnseenPlayer( void )	{ return m_Stealth.IsEnabled(); }
+	virtual void	OF2_StealthAlert( const Vector &vecPos )	{ m_Stealth.TakeAlert( vecPos ); }
+	virtual bool	OF2_AcceptsSquadEnemy( CBaseEntity *pEnemy )	{ return m_Stealth.AcceptsSquadEnemy( pEnemy ); }
+	virtual int		OnTakeDamage_Alive( const CTakeDamageInfo &info );
+	COF2Awareness	*GetStealth( void )				{ return &m_Stealth; }
+	int				SelectStealthSchedule( void );
 
 	void			Spawn( void );
 	void			Precache( void );
@@ -262,6 +277,14 @@ private:
 		SCHED_COMBINE_MOVE_TO_FORCED_GREN_LOS,
 		SCHED_COMBINE_FACE_IDEAL_YAW,
 		SCHED_COMBINE_MOVE_TO_MELEE,
+		// OF2: Stealth
+		SCHED_COMBINE_STEALTH_LOOK,
+		SCHED_COMBINE_STEALTH_INVESTIGATE,
+		SCHED_COMBINE_STEALTH_INVESTIGATE_FAILED,
+		SCHED_COMBINE_STEALTH_SEARCH,
+		SCHED_COMBINE_STEALTH_SEARCH_FAILED,
+		SCHED_COMBINE_STEALTH_RETURN,
+		SCHED_COMBINE_STEALTH_RETURN_FAILED,
 		NEXT_SCHEDULE,
 	};
 
@@ -279,6 +302,14 @@ private:
 		TASK_COMBINE_PLAY_SEQUENCE_FACE_ALTFIRE_TARGET,
 		TASK_COMBINE_GET_PATH_TO_FORCED_GREN_LOS,
 		TASK_COMBINE_SET_STANDING,
+		// OF2: Stealth
+		TASK_COMBINE_STEALTH_FACE_STIMULUS,		// turn to where the evidence points
+		TASK_COMBINE_STEALTH_LOOKED,
+		TASK_COMBINE_STEALTH_GET_PATH_TO_STIMULUS,
+		TASK_COMBINE_STEALTH_ARRIVED,
+		TASK_COMBINE_STEALTH_GET_SEARCH_PATH,
+		TASK_COMBINE_STEALTH_GET_PATH_HOME,
+		TASK_COMBINE_STEALTH_FACE_HOME,
 		NEXT_TASK
 	};
 
@@ -294,6 +325,7 @@ private:
 		COND_COMBINE_DROP_GRENADE,
 		COND_COMBINE_ON_FIRE,
 		COND_COMBINE_ATTACK_SLOT_AVAILABLE,
+		COND_COMBINE_STEALTH_STIMULUS,	// OF2: something new to look into
 		NEXT_CONDITION
 	};
 
@@ -370,6 +402,9 @@ private:
 #ifdef MAPBASE
 	CAI_PolicingBehavior		m_PolicingBehavior;
 #endif
+
+	COF2Awareness				m_Stealth;			// OF2
+	bool						m_bStealthDisabled;	// OF2: "of2_nostealth" in the map
 
 public:
 #ifndef MAPBASE // CAI_GrenadeUser

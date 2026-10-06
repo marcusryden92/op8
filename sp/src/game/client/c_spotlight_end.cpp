@@ -96,6 +96,11 @@ bool C_SpotlightEnd::ShouldInterpolate()
 //------------------------------------------------------------------------------
 void C_SpotlightEnd::ClientThink(void)
 {
+	// OF2: Keep thinking. Stock, the first think with no light to draw was the last, so a
+	// spotlight whose scale ever was 0 (as it is when made) stayed dark for good. The
+	// metrocop's flashlight switches its pool of light off and on as the beam leaves walls.
+	SetNextClientThink( CLIENT_THINK_ALWAYS );
+
 	// If light scale is zero, don't draw light
 	if ( m_flLightScale <= 0 )
 		return;

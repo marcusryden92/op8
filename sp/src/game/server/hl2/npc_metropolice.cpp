@@ -19,6 +19,9 @@
 #include "iservervehicle.h"
 #include "items.h"
 #include "hl2_gamerules.h"
+#include "Sprite.h"	// OF2
+#include "beam_shared.h"
+#include "spotlightend.h"
 #ifdef MAPBASE
 #include "grenade_frag.h"
 #include "mapbase/GlobalStrings.h"
@@ -26,6 +29,24 @@
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
+
+// OF2: Stealth. Cops have no night vision; they have a light on the head. The rest of the
+// stealth convars are in of2_stealth.cpp.
+ConVar of2_stealth_dark_police( "of2_stealth_dark_police", "0", FCVAR_NONE, "Stealth: how fast metrocops make out a player in complete darkness, against one in the light. 0: they cannot see into the dark at all (of2_stealth_blind), and lose sight of a player who steps into it. 1: as if they had night vision." );
+ConVar of2_police_flashlight( "of2_police_flashlight", "1", FCVAR_NONE, "Metrocops have a head flashlight. What it shines on, they (and everyone) can see. Per cop: the of2_flashlight keyvalue, 0 never, 1 where it is dark, 2 always." );
+ConVar of2_police_flashlight_range( "of2_police_flashlight_range", "600", FCVAR_NONE, "Reach of a metrocop's flashlight: how far the beam goes and how far it lets them see." );
+ConVar of2_police_flashlight_fov( "of2_police_flashlight_fov", "50", FCVAR_NONE, "Cone of a metrocop's flashlight in degrees: what it lets them see, and how wide the light lands." );
+ConVar of2_police_flashlight_beam( "of2_police_flashlight_beam", "48", FCVAR_NONE, "How visible the beam of a metrocop's flashlight is in the air (0-255)." );
+ConVar of2_police_flashlight_pool( "of2_police_flashlight_pool", "160", FCVAR_NONE, "Widest the pool of light gets where a metrocop's flashlight lands, in units." );
+ConVar of2_police_flashlight_dark( "of2_police_flashlight_dark", "0.2", FCVAR_NONE, "A metrocop has its flashlight on where the brightness is below this (0-1, the 'light' figure of of2_stealth_light_debug)." );
+ConVar of2_police_flashlight_hold( "of2_police_flashlight_hold", "6", FCVAR_NONE, "Until the game knows how dark it is where a metrocop stands: seconds its flashlight stays on after it has calmed down." );
+ConVar of2_police_flashlight_glow_offset( "of2_police_flashlight_glow_offset", "-3 -4.5 1", FCVAR_NONE, "Where the glow sprite sits from between the eyes: forward, left, up. Read when the light is first switched on." );
+ConVar of2_police_flashlight_glow_scale( "of2_police_flashlight_glow_scale", "0.1", FCVAR_NONE, "Size of the glow sprite. Read when the light is first switched on." );
+
+#define POLICE_FLASHLIGHT_GLOW		"sprites/light_glow03.vmt"
+#define POLICE_FLASHLIGHT_BEAM		"sprites/glow_test02.vmt"
+#define POLICE_FLASHLIGHT_BEAM_WIDTH	6.0f
+#define POLICE_FLASHLIGHT_LIT_TIME	0.5f	// the player stays lit this long after the beam was on them (a think or two)
 
 //#define SF_METROPOLICE_					0x00010000
 #define SF_METROPOLICE_SIMPLE_VERSION		0x00020000
@@ -263,6 +284,20 @@ BEGIN_DATADESC( CNPC_MetroPolice )
 	DEFINE_INPUT( m_iGrenadeCapabilities, FIELD_INTEGER, "SetGrenadeCapabilities" ),
 	DEFINE_INPUT( m_iGrenadeDropCapabilities, FIELD_INTEGER, "SetGrenadeDropCapabilities" ),
 #endif
+
+	// OF2: Stealth
+	DEFINE_EMBEDDED( m_Stealth ),
+	DEFINE_KEYFIELD( m_bStealthDisabled, FIELD_BOOLEAN, "of2_nostealth" ),
+	DEFINE_KEYFIELD( m_iFlashlightMode, FIELD_INTEGER, "of2_flashlight" ),
+	DEFINE_FIELD( m_bFlashlightOn, FIELD_BOOLEAN ),
+	DEFINE_FIELD( m_flAmbientLight, FIELD_FLOAT ),
+	DEFINE_FIELD( m_flFlashlightOffTime, FIELD_TIME ),
+	DEFINE_FIELD( m_hFlashlight, FIELD_EHANDLE ),
+	DEFINE_FIELD( m_hFlashlightGlow, FIELD_EHANDLE ),
+	DEFINE_FIELD( m_hFlashlightEnd, FIELD_EHANDLE ),
+	DEFINE_INPUTFUNC( FIELD_VOID, "EnableStealth", InputEnableStealth ),
+	DEFINE_INPUTFUNC( FIELD_VOID, "DisableStealth", InputDisableStealth ),
+	DEFINE_INPUTFUNC( FIELD_INTEGER, "SetFlashlightMode", InputSetFlashlightMode ),
 
 END_DATADESC()
 
@@ -524,6 +559,378 @@ CNPC_MetroPolice::CNPC_MetroPolice()
 		m_iGrenadeDropCapabilities = (eGrenadeDropCapabilities)(GRENDROPCAP_GRENADE | GRENDROPCAP_ALTFIRE | GRENDROPCAP_INTERRUPTED);
 	}
 #endif
+
+	// OF2
+	m_Stealth.Init( this );
+	m_bStealthDisabled = false;
+	m_iFlashlightMode = 1;
+	m_bFlashlightOn = false;
+	m_flAmbientLight = -1.0f;
+	m_bFlashlightOnSpot = false;
+	m_flFlashlightOffTime = 0.0f;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: OF2: Stealth. See CNPC_Combine for the same hooks; what differs
+//			here is the darkness (no night vision) and the flashlight.
+//-----------------------------------------------------------------------------
+void CNPC_MetroPolice::InputEnableStealth( inputdata_t &inputdata )
+{
+	m_bStealthDisabled = false;
+}
+
+void CNPC_MetroPolice::InputDisableStealth( inputdata_t &inputdata )
+{
+	m_bStealthDisabled = true;
+}
+
+void CNPC_MetroPolice::InputSetFlashlightMode( inputdata_t &inputdata )
+{
+	m_iFlashlightMode = inputdata.value.Int();
+}
+
+bool CNPC_MetroPolice::QuerySeeEntity( CBaseEntity *pEntity, bool bOnlyHateOrFearIfNPC )
+{
+	if ( !BaseClass::QuerySeeEntity( pEntity, bOnlyHateOrFearIfNPC ) )
+		return false;
+
+	if ( pEntity->IsPlayer() )
+	{
+		return m_Stealth.SeePlayer( static_cast<CBasePlayer *>( pEntity ), of2_stealth_dark_police.GetFloat() );
+	}
+
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: OF2: A player in the dark is out of sight, known enemy or not, so a
+//			cop that was fighting them goes to where it last saw them.
+//-----------------------------------------------------------------------------
+bool CNPC_MetroPolice::FVisible( CBaseEntity *pEntity, int traceMask, CBaseEntity **ppBlocker )
+{
+	if ( pEntity && pEntity->IsPlayer() && m_Stealth.IsPlayerHidden( static_cast<CBasePlayer *>( pEntity ), of2_stealth_dark_police.GetFloat() ) )
+	{
+		if ( ppBlocker )
+		{
+			*ppBlocker = NULL;
+		}
+		return false;
+	}
+
+	return BaseClass::FVisible( pEntity, traceMask, ppBlocker );
+}
+
+void CNPC_MetroPolice::OnListened()
+{
+	BaseClass::OnListened();
+
+	m_Stealth.HearSounds();
+}
+
+bool CNPC_MetroPolice::UpdateEnemyMemory( CBaseEntity *pEnemy, const Vector &position, CBaseEntity *pInformer )
+{
+	// A squadmate sees the player and this cop is not in the fight yet:
+	// somewhere to go and look, not knowledge of where the player is
+	if ( m_Stealth.TakeEnemyReport( pEnemy, position, pInformer ) )
+		return false;
+
+	if ( pEnemy && pEnemy->IsPlayer() )
+	{
+		m_Stealth.EnemyUpdated();
+	}
+
+	return BaseClass::UpdateEnemyMemory( pEnemy, position, pInformer );
+}
+
+int CNPC_MetroPolice::SelectStealthSchedule( void )
+{
+	ClearCondition( COND_METROPOLICE_STEALTH_STIMULUS );
+
+	switch ( m_Stealth.SelectSchedule( m_PolicingBehavior.IsEnabled() || m_AssaultBehavior.HasAssaultCue() ) )
+	{
+	case STEALTH_SCHED_LOOK:
+		return SCHED_METROPOLICE_STEALTH_LOOK;
+
+	case STEALTH_SCHED_INVESTIGATE:
+		AlertSound();
+		return SCHED_METROPOLICE_STEALTH_INVESTIGATE;
+
+	case STEALTH_SCHED_SEARCH:
+		return SCHED_METROPOLICE_STEALTH_SEARCH;
+
+	case STEALTH_SCHED_RETURN:
+		return SCHED_METROPOLICE_STEALTH_RETURN;
+	}
+
+	return SCHED_NONE;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: OF2: The head flashlight, built the way HL2 builds its own NPC
+//			lights (the scanner's): a beam from the eyes to where it lands, and
+//			a "spotlight_end" there, which the client turns into a pool of
+//			light. Plus a glow on the side of the head to show it is on.
+//
+//			It was a projected texture at first. That shone backwards as well
+//			(a second light behind the cop, cut off along brush edges): the
+//			stock world shader does not clip a projection behind its origin,
+//			which nobody sees on the player's own flashlight, and Mapbase's
+//			shaders that do are not compiled for this mod.
+//-----------------------------------------------------------------------------
+bool CNPC_MetroPolice::GetFlashlightRay( Vector *pOrigin, Vector *pForward )
+{
+	int iAttachment = LookupAttachment( "eyes" );
+	QAngle angEyes;
+	if ( iAttachment > 0 && GetAttachment( iAttachment, *pOrigin, angEyes ) )
+	{
+		AngleVectors( angEyes, pForward );
+		return true;
+	}
+
+	// No eyes on this model: from the head, the way the body faces
+	*pOrigin = EyePosition();
+	*pForward = BodyDirection3D();
+	return false;
+}
+
+void CNPC_MetroPolice::SetFlashlight( bool bOn )
+{
+	bool bWasOn = m_bFlashlightOn;
+	m_bFlashlightOn = bOn;
+
+	if ( !bOn )
+	{
+		UTIL_Remove( m_hFlashlight );
+		UTIL_Remove( m_hFlashlightEnd );
+		m_hFlashlight = NULL;
+		m_hFlashlightEnd = NULL;
+	}
+	else
+	{
+		Vector vecOrigin, vecForward;
+		bool bHasEyes = GetFlashlightRay( &vecOrigin, &vecForward );
+		int iAttachment = bHasEyes ? LookupAttachment( "eyes" ) : 0;
+
+		if ( !m_hFlashlightEnd )
+		{
+			trace_t tr;
+			UTIL_TraceLine( vecOrigin, vecOrigin + vecForward * of2_police_flashlight_range.GetFloat(), MASK_OPAQUE, this, COLLISION_GROUP_NONE, &tr );
+
+			CSpotlightEnd *pEnd = (CSpotlightEnd *)CreateEntityByName( "spotlight_end" );
+			if ( pEnd )
+			{
+				pEnd->Spawn();
+				pEnd->SetAbsOrigin( tr.endpos );
+				pEnd->SetOwnerEntity( this );
+				// Moved once a think: interpolate over that, not every tick
+				pEnd->SetSimulatedEveryTick( false );
+				pEnd->SetRenderColor( 255, 250, 235 );
+				// The client multiplies the colour by this into a byte: 1 is full, 255 wraps to black
+				pEnd->SetRenderColorA( 1 );
+				pEnd->m_Radius = of2_police_flashlight_range.GetFloat();
+				m_hFlashlightEnd = pEnd;
+			}
+		}
+
+		// (The beam is not saved; this is also where it comes back after a load)
+		if ( !m_hFlashlight && m_hFlashlightEnd )
+		{
+			CBeam *pBeam = CBeam::BeamCreate( POLICE_FLASHLIGHT_BEAM, POLICE_FLASHLIGHT_BEAM_WIDTH );
+			if ( pBeam )
+			{
+				pBeam->AddSpawnFlags( SF_BEAM_TEMPORARY );
+				pBeam->SetColor( 255, 250, 235 );
+				pBeam->SetHaloTexture( PrecacheModel( POLICE_FLASHLIGHT_GLOW ) );
+				pBeam->SetHaloScale( 8 );
+				pBeam->SetEndWidth( POLICE_FLASHLIGHT_BEAM_WIDTH );
+				pBeam->SetBeamFlags( FBEAM_SHADEOUT | FBEAM_NOTILE );
+				pBeam->SetBrightness( of2_police_flashlight_beam.GetInt() );
+				pBeam->SetNoise( 0 );
+				pBeam->EntsInit( this, m_hFlashlightEnd );
+				pBeam->SetHDRColorScale( 0.75f );
+				if ( iAttachment > 0 )
+				{
+					pBeam->SetStartAttachment( iAttachment );
+				}
+				m_hFlashlight = pBeam;
+			}
+		}
+
+		if ( !m_hFlashlightGlow )
+		{
+			CSprite *pGlow = CSprite::SpriteCreate( POLICE_FLASHLIGHT_GLOW, GetAbsOrigin(), false );
+			if ( pGlow )
+			{
+				Vector vecOffset( -3, -4.5, 1 );
+				UTIL_StringToVector( vecOffset.Base(), of2_police_flashlight_glow_offset.GetString() );
+
+				if ( iAttachment > 0 )
+				{
+					pGlow->SetParent( this, iAttachment );
+					pGlow->SetLocalOrigin( vecOffset );
+				}
+				else
+				{
+					pGlow->SetParent( this );
+					pGlow->SetLocalOrigin( Vector( 0, 0, 66 ) + vecOffset );
+				}
+
+				pGlow->SetTransparency( kRenderGlow, 255, 250, 235, 255, kRenderFxNoDissipation );
+				pGlow->SetScale( of2_police_flashlight_glow_scale.GetFloat() );
+				pGlow->SetGlowProxySize( 2.0f );
+
+				m_hFlashlightGlow = pGlow;
+			}
+		}
+	}
+
+	CSprite *pGlow = dynamic_cast<CSprite *>( m_hFlashlightGlow.Get() );
+	if ( pGlow )
+	{
+		if ( bOn )
+		{
+			pGlow->TurnOn();
+		}
+		else
+		{
+			pGlow->TurnOff();
+		}
+	}
+
+	if ( bOn != bWasOn )
+	{
+		EmitSound( bOn ? "HL2Player.FlashLightOn" : "HL2Player.FlashLightOff" );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: OF2: Once per think. Switches the flashlight; while it is on, keeps
+//			the far end where the cop is looking and tells the stealth code when
+//			the player is in the beam.
+//-----------------------------------------------------------------------------
+void CNPC_MetroPolice::UpdateFlashlight( void )
+{
+	bool bWant = false;
+	bool bAuto = of2_police_flashlight.GetBool() && IsAlive() && m_iFlashlightMode == 1;
+
+	// Only the client knows how dark it is here. This asks it to say.
+	if ( m_bOF2WantsLight != bAuto )
+	{
+		m_bOF2WantsLight = bAuto;
+	}
+
+	if ( of2_police_flashlight.GetBool() && IsAlive() )
+	{
+		if ( m_iFlashlightMode >= 2 )
+		{
+			bWant = true;
+		}
+		else if ( m_iFlashlightMode == 1 && m_flAmbientLight >= 0.0f )
+		{
+			// On wherever it is dark, calm or not (the user: a cop standing in the pitch
+			// black with its light off makes no sense). A little apart so it does not flicker.
+			float flDark = of2_police_flashlight_dark.GetFloat();
+			bWant = m_flAmbientLight < ( m_bFlashlightOn ? flDark + 0.08f : flDark );
+		}
+		else if ( m_iFlashlightMode == 1 )
+		{
+			// Not heard from the client yet (it only reports on cops it can see):
+			// on while looking for someone or fighting
+			if ( GetEnemy() || ( m_Stealth.IsEnabled() && m_Stealth.State() != AWARE_UNAWARE ) )
+			{
+				m_flFlashlightOffTime = gpGlobals->curtime + of2_police_flashlight_hold.GetFloat();
+			}
+			bWant = ( gpGlobals->curtime < m_flFlashlightOffTime );
+		}
+	}
+
+	// (On but without its beam: just loaded)
+	if ( bWant != m_bFlashlightOn || ( bWant && ( !m_hFlashlight || !m_hFlashlightEnd ) ) )
+	{
+		SetFlashlight( bWant );
+	}
+
+	m_bFlashlightOnSpot = false;
+
+	CSpotlightEnd *pEnd = dynamic_cast<CSpotlightEnd *>( m_hFlashlightEnd.Get() );
+	CBeam *pBeam = dynamic_cast<CBeam *>( m_hFlashlight.Get() );
+	if ( !m_bFlashlightOn || !pEnd || !pBeam )
+		return;
+
+	Vector vecOrigin, vecForward;
+	GetFlashlightRay( &vecOrigin, &vecForward );
+
+	float flRange = MAX( of2_police_flashlight_range.GetFloat(), 64.0f );
+	float flMinDot = cos( DEG2RAD( of2_police_flashlight_fov.GetFloat() * 0.5f ) );
+
+	// Where it lands. The end is moved by velocity, so it glides between thinks;
+	// a big jump (the beam coming off an edge) goes there at once.
+	trace_t tr;
+	UTIL_TraceLine( vecOrigin, vecOrigin + vecForward * flRange, MASK_OPAQUE, this, COLLISION_GROUP_NONE, &tr );
+
+	Vector vecDelta = tr.endpos - pEnd->GetAbsOrigin();
+	Vector vecVelocity = vecDelta * 10.0f;
+	if ( vecVelocity.Length() > 600.0f )
+	{
+		pEnd->SetAbsOrigin( tr.endpos );
+		vecVelocity = vec3_origin;
+	}
+	pEnd->SetAbsVelocity( vecVelocity );
+
+	pEnd->m_vSpotlightOrg = vecOrigin;
+	pEnd->m_vSpotlightDir = pEnd->GetAbsOrigin() - vecOrigin;
+	float flLength = VectorNormalize( pEnd->m_vSpotlightDir );
+
+	// The pool of light: as wide as the cone is there, and gone at the end of its reach
+	float flPool = clamp( flLength * tan( DEG2RAD( of2_police_flashlight_fov.GetFloat() * 0.5f ) ), 24.0f, of2_police_flashlight_pool.GetFloat() );
+	pEnd->m_flLightScale = ( tr.fraction < 1.0f ) ? flPool / 3.0f : 0.0f;	// the client makes the radius three times this
+	pEnd->m_Radius = flRange;
+
+	pBeam->SetFadeLength( flLength );
+	pBeam->SetEndWidth( MIN( flPool, 48.0f ) );
+	pBeam->SetBrightness( of2_police_flashlight_beam.GetInt() );
+
+	// For the stealth code: is the place it last knew the player to be in the beam?
+	if ( GetEnemy() )
+	{
+		Vector vecToSpot = ( GetEnemyLKP() + Vector( 0, 0, 40 ) ) - vecOrigin;
+		float flSpotDist = VectorNormalize( vecToSpot );
+		m_bFlashlightOnSpot = ( flSpotDist <= flRange && DotProduct( vecToSpot, vecForward ) >= flMinDot );
+	}
+
+	// Chest or head in the beam, with nothing in between: lit, for everyone
+	CBasePlayer *pPlayer = AI_GetSinglePlayer();
+	if ( !pPlayer )
+		return;
+
+	for ( int i = 0; i < 2; i++ )
+	{
+		Vector vecSpot = i ? pPlayer->EyePosition() : pPlayer->WorldSpaceCenter();
+		Vector vecTo = vecSpot - vecOrigin;
+		float flDist = VectorNormalize( vecTo );
+		if ( flDist > flRange || DotProduct( vecTo, vecForward ) < flMinDot )
+			continue;
+
+		trace_t trPlayer;
+		UTIL_TraceLine( vecOrigin, vecSpot, MASK_BLOCKLOS, this, COLLISION_GROUP_NONE, &trPlayer );
+		if ( trPlayer.fraction == 1.0f || trPlayer.m_pEnt == pPlayer )
+		{
+			OF2_PlayerLit( POLICE_FLASHLIGHT_LIT_TIME );
+			break;
+		}
+	}
+}
+
+//-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
+void CNPC_MetroPolice::UpdateOnRemove( void )
+{
+	// OF2
+	UTIL_Remove( m_hFlashlight );
+	UTIL_Remove( m_hFlashlightEnd );
+	UTIL_Remove( m_hFlashlightGlow );
+
+	BaseClass::UpdateOnRemove();
 }
 
 
@@ -554,6 +961,8 @@ void CNPC_MetroPolice::PrescheduleThink( void )
 	// Speak any queued sentences
 	m_Sentences.UpdateSentenceQueue();
 #endif
+
+	UpdateFlashlight();	// OF2
 
 	// Look at near players, always
 	m_bPlayerIsNear = false;
@@ -659,6 +1068,13 @@ void CNPC_MetroPolice::Precache( void )
 	PrecacheScriptSound( "NPC_MetroPolice.WaterSpeech" );
 	PrecacheScriptSound( "NPC_MetroPolice.HidingSpeech" );
 	enginesound->PrecacheSentenceGroup( "METROPOLICE" );
+
+	// OF2: Head flashlight
+	PrecacheModel( POLICE_FLASHLIGHT_GLOW );
+	PrecacheModel( POLICE_FLASHLIGHT_BEAM );
+	UTIL_PrecacheOther( "spotlight_end" );
+	PrecacheScriptSound( "HL2Player.FlashLightOn" );
+	PrecacheScriptSound( "HL2Player.FlashLightOff" );
 
 	BaseClass::Precache();
 }
@@ -3695,6 +4111,12 @@ void CNPC_MetroPolice::ReleaseManhack( void )
 //-----------------------------------------------------------------------------
 void CNPC_MetroPolice::Event_Killed( const CTakeDamageInfo &info )
 {
+	// OF2: The light goes out with the cop
+	UTIL_Remove( m_hFlashlight );
+	UTIL_Remove( m_hFlashlightEnd );
+	UTIL_Remove( m_hFlashlightGlow );
+	m_bFlashlightOn = false;
+
 	// Release the manhack if we're in the middle of deploying him
 	if ( m_hManhack && m_hManhack->IsAlive() )
 	{
@@ -5004,6 +5426,11 @@ int CNPC_MetroPolice::SelectSchedule( void )
 		if ( m_bKeepFacingPlayer && !PlayerIsCriminal() )
 			return SCHED_TARGET_FACE;
 
+		// OF2: Stealth. Something to look at or look for, short of an enemy.
+		nSched = SelectStealthSchedule();
+		if ( nSched != SCHED_NONE )
+			return nSched;
+
 		switch( m_NPCState )
 		{
 		case NPC_STATE_IDLE:
@@ -5029,6 +5456,11 @@ int CNPC_MetroPolice::SelectSchedule( void )
 			if (!IsEnemyInAnAirboat() || !Weapon_OwnsThisType( "weapon_smg1" ) )
 #endif
 			{
+				// OF2: Stealth. Cannot see them (a cop in the dark never does) but knows where
+				// they were a moment ago, from sight or from the sound of the shot: fire at that.
+				if ( m_fWeaponDrawn && !HasBaton() && m_Stealth.ShouldSuppressLKP() && OccupyStrategySlotRange( SQUAD_SLOT_ATTACK1, SQUAD_SLOT_ATTACK2 ) )
+					return SCHED_METROPOLICE_STEALTH_SUPPRESS;
+
 				int nResult = SelectCombatSchedule();
 				if ( nResult != SCHED_NONE )
 					return nResult;
@@ -5280,6 +5712,15 @@ void CNPC_MetroPolice::StartTask( const Task_t *pTask )
 {
 	switch (pTask->iTask)
 	{
+	// OF2: Stealth
+	case TASK_METROPOLICE_STEALTH_FACE_STIMULUS:		if ( m_Stealth.StartTask( STEALTH_TASK_FACE_STIMULUS ) ) ChainStartTask( TASK_FACE_IDEAL );			break;
+	case TASK_METROPOLICE_STEALTH_LOOKED:				m_Stealth.StartTask( STEALTH_TASK_LOOKED );					break;
+	case TASK_METROPOLICE_STEALTH_GET_PATH_TO_STIMULUS:	m_Stealth.StartTask( STEALTH_TASK_GET_PATH_TO_STIMULUS );	break;
+	case TASK_METROPOLICE_STEALTH_ARRIVED:				m_Stealth.StartTask( STEALTH_TASK_ARRIVED );				break;
+	case TASK_METROPOLICE_STEALTH_GET_SEARCH_PATH:		m_Stealth.StartTask( STEALTH_TASK_GET_SEARCH_PATH );		break;
+	case TASK_METROPOLICE_STEALTH_GET_PATH_HOME:		m_Stealth.StartTask( STEALTH_TASK_GET_PATH_HOME );			break;
+	case TASK_METROPOLICE_STEALTH_FACE_HOME:			if ( m_Stealth.StartTask( STEALTH_TASK_FACE_HOME ) ) ChainStartTask( TASK_FACE_IDEAL );				break;
+
 	case TASK_METROPOLICE_WAIT_FOR_SENTENCE:
 		{
 			if ( FOkToMakeSound( pTask->flTaskData ) )
@@ -5616,6 +6057,12 @@ void CNPC_MetroPolice::RunTask( const Task_t *pTask )
 		BaseClass::RunTask( pTask );
 		break;
 
+	// OF2: Stealth
+	case TASK_METROPOLICE_STEALTH_FACE_STIMULUS:
+	case TASK_METROPOLICE_STEALTH_FACE_HOME:
+		ChainRunTask( TASK_FACE_IDEAL );
+		break;
+
 	case TASK_METROPOLICE_WAIT_FOR_SENTENCE:
 		{
 			if ( FOkToMakeSound( pTask->flTaskData ) )
@@ -5823,7 +6270,15 @@ int CNPC_MetroPolice::OnTakeDamage_Alive( const CTakeDamageInfo &inputInfo )
 		m_flRecentDamageTime = gpGlobals->curtime;
 	}
 
-	return BaseClass::OnTakeDamage_Alive( info ); 
+	int iResult = BaseClass::OnTakeDamage_Alive( info );
+
+	// OF2: Stealth. Being hurt by the player ends any doubt about them.
+	if ( IsAlive() )
+	{
+		m_Stealth.TookDamage( info.GetAttacker() );
+	}
+
+	return iResult;
 }
 
 
@@ -5857,6 +6312,28 @@ void CNPC_MetroPolice::BuildScheduleTestBits( void )
 	if ( PlayerIsCriminal() == false )
 	{
 		SetCustomInterruptCondition( COND_METROPOLICE_PHYSOBJECT_ASSAULT );
+	}
+
+	// OF2: Stealth. New evidence breaks into standing about and patrolling
+	// (the stealth schedules list it themselves).
+	if ( !GetEnemy() && m_Stealth.IsEnabled() && ( m_NPCState == NPC_STATE_IDLE || m_NPCState == NPC_STATE_ALERT ) )
+	{
+		static const int stealthInterrupted[] =
+		{
+			SCHED_IDLE_STAND, SCHED_IDLE_WALK, SCHED_IDLE_WANDER, SCHED_PATROL_WALK,
+			SCHED_ALERT_STAND, SCHED_ALERT_FACE, SCHED_ALERT_FACE_BESTSOUND, SCHED_ALERT_SCAN, SCHED_ALERT_WALK,
+			SCHED_INVESTIGATE_SOUND, SCHED_METROPOLICE_WALK, SCHED_METROPOLICE_INVESTIGATE_SOUND, SCHED_METROPOLICE_ALERT_FACE_BESTSOUND,
+		};
+
+		for ( int i = 0; i < ARRAYSIZE( stealthInterrupted ); i++ )
+		{
+			// As selected, or as it came out of translation
+			if ( IsCurSchedule( stealthInterrupted[i], true ) || IsCurSchedule( stealthInterrupted[i], false ) )
+			{
+				SetCustomInterruptCondition( COND_METROPOLICE_STEALTH_STIMULUS );
+				break;
+			}
+		}
 	}
 
 	//FIXME: Always interrupt for now
@@ -5942,6 +6419,18 @@ WeaponProficiency_t CNPC_MetroPolice::CalcWeaponProficiency( CBaseCombatWeapon *
 void CNPC_MetroPolice::GatherConditions( void )
 {
 	BaseClass::GatherConditions();
+
+	// OF2: Stealth
+	m_Stealth.SetDisabled( m_bStealthDisabled );
+	// Can it see that the place it last knew the player to be is empty? Only where there
+	// is light: the room's (as far as it knows: where it stands), or its flashlight's.
+	m_Stealth.SetVision( of2_stealth_dark_police.GetFloat(),
+		m_bFlashlightOnSpot || m_flAmbientLight >= of2_police_flashlight_dark.GetFloat() + 0.08f );
+	m_Stealth.Update();
+	if ( m_Stealth.HasChanged() )
+	{
+		SetCondition( COND_METROPOLICE_STEALTH_STIMULUS );
+	}
 
 	if ( m_bPlayerTooClose == false )
 	{
@@ -6066,6 +6555,10 @@ bool CNPC_MetroPolice::QueryHearSound( CSound *pSound )
 		if ( pSound->IsSoundType( SOUND_DANGER ) && pSound->m_hOwner && IRelationType( pSound->m_hOwner ) == D_NU )
 			return false;
 	}
+
+	// OF2: Stealth. The player's own sounds carry less far, and through walls less again.
+	if ( pSound->IsSoundType( SOUND_PLAYER ) && m_Stealth.IsEnabled() && !m_Stealth.CanHearPlayerSound( pSound ) )
+		return false;
 
 	return BaseClass::QueryHearSound( pSound );
 }
@@ -6212,12 +6705,22 @@ AI_BEGIN_CUSTOM_NPC( npc_metropolice, CNPC_MetroPolice )
 	DECLARE_TASK( TASK_METROPOLICE_PLAY_SEQUENCE_FACE_ALTFIRE_TARGET )
 #endif
 
+	// OF2: Stealth
+	DECLARE_TASK( TASK_METROPOLICE_STEALTH_FACE_STIMULUS )
+	DECLARE_TASK( TASK_METROPOLICE_STEALTH_LOOKED )
+	DECLARE_TASK( TASK_METROPOLICE_STEALTH_GET_PATH_TO_STIMULUS )
+	DECLARE_TASK( TASK_METROPOLICE_STEALTH_ARRIVED )
+	DECLARE_TASK( TASK_METROPOLICE_STEALTH_GET_SEARCH_PATH )
+	DECLARE_TASK( TASK_METROPOLICE_STEALTH_GET_PATH_HOME )
+	DECLARE_TASK( TASK_METROPOLICE_STEALTH_FACE_HOME )
+
 	DECLARE_CONDITION( COND_METROPOLICE_ON_FIRE );
 	DECLARE_CONDITION( COND_METROPOLICE_ENEMY_RESISTING_ARREST );
 //	DECLARE_CONDITION( COND_METROPOLICE_START_POLICING );
 	DECLARE_CONDITION( COND_METROPOLICE_PLAYER_TOO_CLOSE );
 	DECLARE_CONDITION( COND_METROPOLICE_CHANGE_BATON_STATE );
 	DECLARE_CONDITION( COND_METROPOLICE_PHYSOBJECT_ASSAULT );
+	DECLARE_CONDITION( COND_METROPOLICE_STEALTH_STIMULUS );	// OF2
 
 
 	//=========================================================
@@ -6909,6 +7412,210 @@ DEFINE_SCHEDULE
  "		COND_TOO_CLOSE_TO_ATTACK"
  )
 #endif
+
+ //=========================================================
+ // OF2: Stealth (of2_stealth.h). None of these has an enemy.
+ //
+ // SCHED_METROPOLICE_STEALTH_LOOK
+ //
+ //	Suspicious: stop, turn to it, watch for a while.
+ //=========================================================
+ DEFINE_SCHEDULE
+ (
+ SCHED_METROPOLICE_STEALTH_LOOK,
+
+ "	Tasks"
+ "		TASK_STOP_MOVING						0"
+ "		TASK_METROPOLICE_STEALTH_FACE_STIMULUS		0"
+ "		TASK_SET_ACTIVITY						ACTIVITY:ACT_IDLE"
+ "		TASK_WAIT								2"
+ "		TASK_WAIT_RANDOM						2"
+ "		TASK_METROPOLICE_STEALTH_LOOKED				0"
+ ""
+ "	Interrupts"
+ "		COND_NEW_ENEMY"
+ "		COND_LIGHT_DAMAGE"
+ "		COND_HEAVY_DAMAGE"
+ "		COND_HEAR_DANGER"
+ "		COND_HEAR_MOVE_AWAY"
+ "		COND_METROPOLICE_STEALTH_STIMULUS"
+ )
+
+ //=========================================================
+ // SCHED_METROPOLICE_STEALTH_INVESTIGATE
+ //
+ //	Searching: go to where it was, then look left and right.
+ //=========================================================
+ DEFINE_SCHEDULE
+ (
+ SCHED_METROPOLICE_STEALTH_INVESTIGATE,
+
+ "	Tasks"
+ "		TASK_SET_FAIL_SCHEDULE						SCHEDULE:SCHED_METROPOLICE_STEALTH_INVESTIGATE_FAILED"
+ "		TASK_STOP_MOVING							0"
+ "		TASK_METROPOLICE_STEALTH_FACE_STIMULUS			0"
+ "		TASK_WAIT									0.5"
+ "		TASK_METROPOLICE_STEALTH_GET_PATH_TO_STIMULUS	0"
+ "		TASK_WAIT_FOR_MOVEMENT						0"
+ "		TASK_STOP_MOVING							0"
+ "		TASK_METROPOLICE_STEALTH_ARRIVED				0"
+ "		TASK_SET_ACTIVITY							ACTIVITY:ACT_IDLE"
+ "		TASK_WAIT									1.5"
+ "		TASK_TURN_LEFT								100"
+ "		TASK_WAIT									1"
+ "		TASK_TURN_RIGHT								200"
+ "		TASK_WAIT									1.5"
+ ""
+ "	Interrupts"
+ "		COND_NEW_ENEMY"
+ "		COND_LIGHT_DAMAGE"
+ "		COND_HEAVY_DAMAGE"
+ "		COND_HEAR_DANGER"
+ "		COND_HEAR_MOVE_AWAY"
+ "		COND_METROPOLICE_STEALTH_STIMULUS"
+ )
+
+ //=========================================================
+ // SCHED_METROPOLICE_STEALTH_INVESTIGATE_FAILED
+ //
+ //	No way there: watch it from here, then search around.
+ //=========================================================
+ DEFINE_SCHEDULE
+ (
+ SCHED_METROPOLICE_STEALTH_INVESTIGATE_FAILED,
+
+ "	Tasks"
+ "		TASK_STOP_MOVING						0"
+ "		TASK_METROPOLICE_STEALTH_FACE_STIMULUS		0"
+ "		TASK_METROPOLICE_STEALTH_ARRIVED			0"
+ "		TASK_SET_ACTIVITY						ACTIVITY:ACT_IDLE"
+ "		TASK_WAIT								3"
+ ""
+ "	Interrupts"
+ "		COND_NEW_ENEMY"
+ "		COND_LIGHT_DAMAGE"
+ "		COND_HEAVY_DAMAGE"
+ "		COND_HEAR_DANGER"
+ "		COND_HEAR_MOVE_AWAY"
+ "		COND_METROPOLICE_STEALTH_STIMULUS"
+ )
+
+ //=========================================================
+ // SCHED_METROPOLICE_STEALTH_SEARCH
+ //
+ //	Searching, and there was nothing where it looked: walk
+ //	to somewhere nearby, look about. Picked again until the
+ //	search runs out.
+ //=========================================================
+ DEFINE_SCHEDULE
+ (
+ SCHED_METROPOLICE_STEALTH_SEARCH,
+
+ "	Tasks"
+ "		TASK_SET_FAIL_SCHEDULE					SCHEDULE:SCHED_METROPOLICE_STEALTH_SEARCH_FAILED"
+ "		TASK_STOP_MOVING						0"
+ "		TASK_METROPOLICE_STEALTH_GET_SEARCH_PATH	0"
+ "		TASK_WAIT_FOR_MOVEMENT					0"
+ "		TASK_STOP_MOVING						0"
+ "		TASK_SET_ACTIVITY						ACTIVITY:ACT_IDLE"
+ "		TASK_WAIT								1"
+ "		TASK_TURN_LEFT							120"
+ "		TASK_WAIT								1"
+ "		TASK_WAIT_RANDOM						2"
+ ""
+ "	Interrupts"
+ "		COND_NEW_ENEMY"
+ "		COND_LIGHT_DAMAGE"
+ "		COND_HEAVY_DAMAGE"
+ "		COND_HEAR_DANGER"
+ "		COND_HEAR_MOVE_AWAY"
+ "		COND_METROPOLICE_STEALTH_STIMULUS"
+ )
+
+ DEFINE_SCHEDULE
+ (
+ SCHED_METROPOLICE_STEALTH_SEARCH_FAILED,
+
+ "	Tasks"
+ "		TASK_STOP_MOVING						0"
+ "		TASK_SET_ACTIVITY						ACTIVITY:ACT_IDLE"
+ "		TASK_WAIT								1"
+ "		TASK_TURN_LEFT							120"
+ "		TASK_WAIT								2"
+ ""
+ "	Interrupts"
+ "		COND_NEW_ENEMY"
+ "		COND_LIGHT_DAMAGE"
+ "		COND_HEAVY_DAMAGE"
+ "		COND_HEAR_DANGER"
+ "		COND_HEAR_MOVE_AWAY"
+ "		COND_METROPOLICE_STEALTH_STIMULUS"
+ )
+
+ //=========================================================
+ // SCHED_METROPOLICE_STEALTH_RETURN
+ //
+ //	Nothing came of it: back to where it stood, facing as before.
+ //=========================================================
+ DEFINE_SCHEDULE
+ (
+ SCHED_METROPOLICE_STEALTH_RETURN,
+
+ "	Tasks"
+ "		TASK_SET_FAIL_SCHEDULE					SCHEDULE:SCHED_METROPOLICE_STEALTH_RETURN_FAILED"
+ "		TASK_STOP_MOVING						0"
+ "		TASK_METROPOLICE_STEALTH_GET_PATH_HOME		0"
+ "		TASK_WAIT_FOR_MOVEMENT					0"
+ "		TASK_STOP_MOVING						0"
+ "		TASK_METROPOLICE_STEALTH_FACE_HOME			0"
+ ""
+ "	Interrupts"
+ "		COND_NEW_ENEMY"
+ "		COND_LIGHT_DAMAGE"
+ "		COND_HEAVY_DAMAGE"
+ "		COND_HEAR_DANGER"
+ "		COND_HEAR_MOVE_AWAY"
+ "		COND_METROPOLICE_STEALTH_STIMULUS"
+ )
+
+ DEFINE_SCHEDULE
+ (
+ SCHED_METROPOLICE_STEALTH_RETURN_FAILED,
+
+ "	Tasks"
+ "		TASK_STOP_MOVING						0"
+ "		TASK_METROPOLICE_STEALTH_FACE_HOME			0"
+ "		TASK_WAIT								1"
+ ""
+ "	Interrupts"
+ "		COND_NEW_ENEMY"
+ "		COND_METROPOLICE_STEALTH_STIMULUS"
+ )
+
+ //=========================================================
+ // SCHED_METROPOLICE_STEALTH_SUPPRESS
+ //
+ //	Has an enemy it cannot see: fire at where it last knew
+ //	them to be (facing and aim are at the last known position).
+ //=========================================================
+ DEFINE_SCHEDULE
+ (
+ SCHED_METROPOLICE_STEALTH_SUPPRESS,
+
+ "	Tasks"
+ "		TASK_STOP_MOVING			0"
+ "		TASK_FACE_ENEMY				0"
+ "		TASK_RANGE_ATTACK1			0"
+ ""
+ "	Interrupts"
+ "		COND_ENEMY_DEAD"
+ "		COND_HEAVY_DAMAGE"
+ "		COND_NO_PRIMARY_AMMO"
+ "		COND_HEAR_DANGER"
+ "		COND_HEAR_MOVE_AWAY"
+ "		COND_WEAPON_BLOCKED_BY_FRIEND"
+ )
+
 
 AI_END_CUSTOM_NPC()
 

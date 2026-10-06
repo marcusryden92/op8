@@ -30,9 +30,12 @@
 // Share of its speed along a surface a point loses when it touches one
 #define ROPE_FRICTION			0.3f
 
-// Share of what a point is pulled in by that the point before it gives up in
-// speed (see Step). 0: none, and the rope's free end thrashes.
-#define ROPE_FOLLOW_GIVE		0.9f
+// The pass that brings each point within reach of the one before it (see
+// Step), and the share of what a point is pulled in by that the point before
+// it gives up in speed. Settings rather than constants so the two can be
+// compared in game: the user was not sure the rope looked better with them.
+ConVar of2_rope_follow( "of2_rope_follow", "1", FCVAR_REPLICATED, "A loose rope's points are each pulled within reach of the one before, so a pull at one end reaches all of it at once and goes round what it lies over. 0: only the usual few passes over its links; it stretches more when dragged." );
+ConVar of2_rope_follow_give( "of2_rope_follow_give", "0.9", FCVAR_REPLICATED, "With of2_rope_follow: how much of each such pull the point before feels. 0: none, and a hanging rope's free end thrashes. 1: all of it; the rope is at its calmest and stiffest." );
 
 // How many surfaces a point slides along in one step before it stops
 #define ROPE_SLIDES				2
@@ -245,8 +248,10 @@ void COF2RopeSim::Step( const Vector &vecRoot, const Vector &vecWind )
 			}
 		}
 	}
-	else
+	else if ( of2_rope_follow.GetBool() )
 	{
+		float flGive = clamp( of2_rope_follow_give.GetFloat(), 0.0f, 1.0f );
+
 		// Held at the root only, each point in turn is brought within reach of
 		// the one before it, which stays put. So a pull at the root reaches all
 		// the way down the rope in one step, and reaches each point from the
@@ -260,7 +265,7 @@ void COF2RopeSim::Step( const Vector &vecRoot, const Vector &vecWind )
 		// nothing of it, which is not how a rope works: every little sway at
 		// the root grew on its way down, and the free end thrashed about on a
 		// rope that was only hanging there. So what a point is moved by is
-		// taken out of the speed of the one before it (ROPE_FOLLOW_GIVE), as
+		// taken out of the speed of the one before it (of2_rope_follow_give), as
 		// if the one had pulled on the other.
 		for ( int i = 1; i <= iLast; i++ )
 		{
@@ -273,7 +278,7 @@ void COF2RopeSim::Step( const Vector &vecRoot, const Vector &vecWind )
 
 				if ( i > 1 )
 				{
-					m_vecPrev[i - 1] += vecMoved * ROPE_FOLLOW_GIVE;
+					m_vecPrev[i - 1] += vecMoved * flGive;
 				}
 			}
 		}

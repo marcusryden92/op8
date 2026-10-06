@@ -13,6 +13,12 @@
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
+#ifdef HL2_EPISODIC
+// OF2: Stealth. See CSoundEnt::InsertSound.
+ConVar of2_gunfire_volume( "of2_gunfire_volume", "1500", FCVAR_NONE, "How far NPCs hear the player's quietest gun, in units, before of2_gunfire_carry (stock: 600 to 1500 depending on the gun)." );
+ConVar of2_gunfire_carry( "of2_gunfire_carry", "2.5", FCVAR_NONE, "Multiplies how far NPCs hear the player's gunfire (1 = stock distances). The K98 has its own base, of2_k98_noise." );
+#endif
+
 //-----------------------------------------------------------------------------
 // Some enumerations needed by CSoundEnt
 //-----------------------------------------------------------------------------
@@ -458,6 +464,16 @@ void CSoundEnt::InsertSound ( int iType, const Vector &vecOrigin, int iVolume, f
 
 	if ( !g_pSoundEnt )
 		return;
+
+#ifdef HL2_EPISODIC
+	// OF2: Stealth. The player's gunfire carries. Stock it is heard 1500 units off at best
+	// (and the 357 only 600), which is the next room. Anything of the player's louder than
+	// a dry click is a shot; explosions keep their own size.
+	if ( ( iType & SOUND_COMBAT ) && !( iType & SOUND_CONTEXT_EXPLOSION ) && pOwner && pOwner->IsPlayer() && iVolume > SOUNDENT_VOLUME_EMPTY )
+	{
+		iVolume = (int)( MAX( iVolume, of2_gunfire_volume.GetFloat() ) * of2_gunfire_carry.GetFloat() );
+	}
+#endif
 
 	if( soundChannelIndex == SOUNDENT_CHANNEL_UNSPECIFIED )
 	{

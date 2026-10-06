@@ -2201,6 +2201,8 @@ CAmmoDef *GetAmmoDef()
 		def.AddAmmoType("CombineHeavyCannon",	DMG_BULLET,				TRACER_LINE,			40,	40, NULL, 10 * 750 * 12, AMMO_FORCE_DROP_IF_CARRIED ); // hit like a 10 kg weight at 750 ft/s
 #endif
 		def.AddAmmoType("ammo_proto1",			DMG_BULLET,				TRACER_LINE,			0, 0, 10, 0, 0 );
+		// OF2: manhacks to throw (server\hl2\weapon_of2_manhack.cpp); the player carries three
+		def.AddAmmoType("Manhack",				DMG_SLASH,				TRACER_NONE,			0, 0, 3, 0, 0 );
 #endif // HL2_EPISODIC
 #ifdef MAPBASE
 		def.AddAmmoType("slam",				DMG_BURN,					TRACER_NONE,			0,			0,			5,			0,							0 );

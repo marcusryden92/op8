@@ -47,6 +47,11 @@
 #include "vstdlib/IKeyValuesSystem.h" // From Alien Swarm SDK
 #endif
 
+#ifdef HL2_EPISODIC
+// OF2: hl2\of2_stealth.cpp
+void OF2_PropImpactNoise( CBaseEntity *pProp, int index, gamevcollisionevent_t *pEvent, float &flNextTime );
+#endif
+
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
@@ -3634,6 +3639,11 @@ void CPhysicsProp::ComputeEnablingImpulse( int index, gamevcollisionevent_t *pEv
 void CPhysicsProp::VPhysicsCollision( int index, gamevcollisionevent_t *pEvent )
 {
 	BaseClass::VPhysicsCollision( index, pEvent );
+
+#ifdef HL2_EPISODIC
+	// OF2: Stealth. Something NPCs can hear and go and look at.
+	OF2_PropImpactNoise( this, index, pEvent, m_flOF2NextImpactNoise );
+#endif
 
 	IPhysicsObject *pPhysObj = pEvent->pObjects[!index];
 

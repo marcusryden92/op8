@@ -16,6 +16,7 @@
 #include "soundent.h"
 #include "animation.h"
 #include "ai_condition.h"
+#include "ai_basenpc.h"	// OF2
 #include "basebludgeonweapon.h"
 #include "ndebugoverlay.h"
 #include "te_effect_dispatch.h"
@@ -168,7 +169,19 @@ void CBaseHLBludgeonWeapon::Hit( trace_t &traceHit, Activity nHitActivity, bool 
 	AddViewKick();
 
 	//Make sound for the AI
-	CSoundEnt::InsertSound( SOUND_BULLET_IMPACT, traceHit.endpos, 400, 0.2f, pPlayer );
+	// OF2: Stealth. A quiet weapon is heard only close by. On a body it is the sound of a
+	// struggle, which whoever hears it comes to look at; it belongs to the attacker because
+	// the sounds an NPC makes are dropped the moment it is removed, which is when it dies.
+	float flQuietRadius = GetQuietHitRadius();
+	if ( flQuietRadius > 0.0f )
+	{
+		bool bHitNPC = traceHit.m_pEnt && traceHit.m_pEnt->IsNPC();
+		CSoundEnt::InsertSound( bHitNPC ? SOUND_COMBAT : SOUND_BULLET_IMPACT, traceHit.endpos, (int)flQuietRadius, 0.3f, pPlayer );
+	}
+	else
+	{
+		CSoundEnt::InsertSound( SOUND_BULLET_IMPACT, traceHit.endpos, 400, 0.2f, pPlayer );
+	}
 
 	// This isn't great, but it's something for when the crowbar hits.
 	pPlayer->RumbleEffect( RUMBLE_AR2, 0, RUMBLE_FLAG_RESTART );
@@ -193,6 +206,12 @@ void CBaseHLBludgeonWeapon::Hit( trace_t &traceHit, Activity nHitActivity, bool 
 		{
 			// If bonking an NPC, adjust damage.
 			info.AdjustPlayerDamageInflictedForSkillLevel();
+		}
+
+		// OF2: and the one hit does not shout about it either (CAI_BaseNPC::OnTakeDamage_Alive)
+		if ( flQuietRadius > 0.0f )
+		{
+			info.SetDamageCustom( OF2_DMG_CUSTOM_QUIET );
 		}
 
 		// OF2: the weapon can scale the push

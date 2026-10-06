@@ -39,6 +39,10 @@ ConVar of2_knife_stab_recover( "of2_knife_stab_recover", "0.3", FCVAR_NONE, "Sec
 // sends bodies flying. 0.2 makes a stab push like one crowbar hit.
 ConVar of2_knife_push( "of2_knife_push", "0.2", FCVAR_NONE, "How hard the knife pushes what it hits (bodies included), as a fraction of the usual melee push for its damage." );
 
+// Stealth. About three metres: a knife going in is heard by someone standing next to it, who
+// comes to look, and by nobody across the room. Also read by CAI_BaseNPC::OnTakeDamage_Alive.
+ConVar of2_knife_noise( "of2_knife_noise", "120", FCVAR_NONE, "How far NPCs hear a knife hit, in units (the crowbar: 400, and a wounded NPC 1024)." );
+
 // However the convars are set, an attack takes this long
 #define KNIFE_MIN_REFIRE	0.1f
 
@@ -65,6 +69,7 @@ public:
 	int			GetDamageType()			{	return	m_bStab ? DMG_CLUB : DMG_SLASH;	}
 	float		GetDamageForActivity( Activity hitActivity );
 	float		GetDamageForceScale()	{	return	MAX( of2_knife_push.GetFloat(), 0.0f );	}
+	float		GetQuietHitRadius()		{	return	MAX( of2_knife_noise.GetFloat(), 1.0f );	}
 	Activity	GetPrimaryAttackActivity( void )	{	return	m_bStab ? ACT_VM_SECONDARYATTACK : ACT_VM_HITCENTER;	}
 
 	bool		SendWeaponAnim( int iActivity );

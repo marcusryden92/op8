@@ -1769,7 +1769,11 @@ void CNPC_Manhack::CheckCollisions(float flInterval)
 
 		if ( pHitEntity != NULL && 
 			 pHitEntity->m_takedamage == DAMAGE_YES && 
-			 pHitEntity->Classify() != CLASS_MANHACK && 
+			 pHitEntity->Classify() != CLASS_MANHACK &&
+#ifdef HL2_EPISODIC
+			 // OF2: one on the player's side (thrown by weapon_manhack) only bumps into its friends
+			 !( m_bHackedByAlyx && IRelationType( pHitEntity ) == D_LI ) &&
+#endif
 			 gpGlobals->curtime > m_flWaterSuspendTime )
 		{
 			// Slice this thing
