@@ -66,6 +66,10 @@
 #define BARNACLE_REEL_SEQUENCE		"slurp"
 // A neck breaking on the tongue, or a headcrab coming off its zombie
 #define BARNACLE_FLINCH_SEQUENCE	"flinch1"
+// Reeled up to something too big to kill outright, and biting it
+#define BARNACLE_BITE_SEQUENCE		"attack_player"
+// How often it bites
+#define BARNACLE_BITE_INTERVAL		0.5f
 
 // Most things the length of the tongue can hold at once (of2_barnacle_collect_count)
 #define BARNACLE_MAX_JUNK			8
@@ -163,6 +167,8 @@ ConVar of2_barnacle_strain_damage( "of2_barnacle_strain_damage", "30", FCVAR_NON
 ConVar of2_barnacle_corpses( "of2_barnacle_corpses", "1", FCVAR_NONE, "While the player has the Barnacle, what dies leaves a body the tongue can take hold of (a ragdoll on the server, as the gravity gun's charged form makes them). 0: bodies are as in Half-Life 2, only there for the eye." );
 ConVar of2_barnacle_corpse_speed( "of2_barnacle_corpse_speed", "0.35", FCVAR_NONE, "With a body on its tongue the Barnacle reels and pulls at this share of its usual speed." );
 ConVar of2_barnacle_corpse_mass( "of2_barnacle_corpse_mass", "250", FCVAR_NONE, "Heaviest body the Barnacle pulls in. A body is pulled whatever of2_barnacle_anchor_mass says, up to this; a heavier one holds the player." );
+ConVar of2_barnacle_bite_damage( "of2_barnacle_bite_damage", "40", FCVAR_NONE, "Damage a second the Barnacle does to an enemy too big for its tongue to kill (an antlion guard), once the player has reeled themselves up to it and goes on reeling." );
+ConVar of2_barnacle_bite_range( "of2_barnacle_bite_range", "120", FCVAR_NONE, "The Barnacle bites such an enemy once there is no more tongue than this between them. The tongue has hold of a part of its body, which the player can't get right up to." );
 ConVar of2_barnacle_auto_release( "of2_barnacle_auto_release", "1", FCVAR_NONE, "The Barnacle takes its tongue back by itself once there is nothing left to reel: the player stands on the ground as near as the tongue gets them, or what it holds has been pulled all the way in." );
 ConVar of2_barnacle_debug( "of2_barnacle_debug", "0", FCVAR_NONE, "Draw the Barnacle's tongue as debug overlays: its line and bends, its points, and what it holds." );
 
@@ -215,6 +221,8 @@ enum BarnaclePrey_t
 	PREY_ZOMBIE,
 	// Held by where it was hit; killed when the tongue is pulled tight
 	PREY_HUMAN,
+	// Too big for any of that: it holds the player, who reels up to it, and is bitten
+	PREY_BIG,
 };
 
 static BarnaclePrey_t BarnaclePreyKind( CBaseEntity *pEntity, CBaseEntity *pPlayer )
@@ -236,10 +244,19 @@ static BarnaclePrey_t BarnaclePreyKind( CBaseEntity *pEntity, CBaseEntity *pPlay
 	if ( pZombie )
 		return pZombie->OF2_IsHeadless() ? PREY_NONE : PREY_ZOMBIE;
 
+	if ( pPlayer == NULL || pNPC->IRelationType( pPlayer ) != D_HT )
+		return PREY_NONE;
+
 	// People: soldiers, police, citizens. Only those who are after the player.
-	// Anything bigger, and machines, the tongue passes through.
-	if ( pNPC->GetHullType() == HULL_HUMAN && dynamic_cast<CAI_BaseActor *>( pNPC ) && pPlayer && pNPC->IRelationType( pPlayer ) == D_HT )
+	if ( pNPC->GetHullType() == HULL_HUMAN && dynamic_cast<CAI_BaseActor *>( pNPC ) )
 		return PREY_HUMAN;
+
+	// Other enemies that walk the ground: antlions and their guards, hunters.
+	// What flies, the small machines and the fixed ones, the tongue passes through.
+	Hull_t iHull = pNPC->GetHullType();
+	if ( pNPC->GetMoveType() == MOVETYPE_STEP && !( pNPC->GetFlags() & FL_FLY ) &&
+		 iHull != HULL_TINY && iHull != HULL_TINY_CENTERED && iHull != HULL_SMALL_CENTERED )
+		return PREY_BIG;
 
 	return PREY_NONE;
 }
@@ -898,6 +915,7 @@ private:
 	void	ReleaseCarried( void );
 	void	EatCarried( CBasePlayer *pOwner );
 	void	UpdatePrey( CHL2_Player *pPlayer );
+	void	BitePrey( CHL2_Player *pPlayer );
 	void	SnapPrey( CHL2_Player *pPlayer, CAI_BaseNPC *pNPC );
 	void	RipHeadcrab( CHL2_Player *pPlayer, CAI_BaseNPC *pNPC );
 
@@ -961,6 +979,10 @@ private:
 	// ...or, if it is a zombie, takes its headcrab off instead
 	bool		m_bPreyZombie;
 	float		m_flNextStrain;
+	// The tip is on an enemy too big to kill outright (TIP_ANCHORED, by
+	// m_iPreyBone); m_bBiting while the barnacle is at it
+	bool		m_bTipBig;
+	bool		m_bBiting;
 
 	// Anchored: m_flLeash is how far the player can get from the tip, along
 	// the tongue; m_flLeashMax all the tongue there is.
@@ -1054,6 +1076,8 @@ CWeaponBarnacle::CWeaponBarnacle()
 	m_bPreySnap = false;
 	m_bPreyZombie = false;
 	m_flNextStrain = 0.0f;
+	m_bTipBig = false;
+	m_bBiting = false;
 	m_flLeash = 0.0f;
 	m_flLeashMax = 0.0f;
 	m_nJunk = 0;
@@ -1218,9 +1242,10 @@ void CWeaponBarnacle::ItemPostFrame( void )
 
 	if ( m_bReeling && gpGlobals->curtime >= m_flReactTime )
 	{
-		// It swallows for as long as it reels (the sequence loops), and goes
-		// back to idling as soon as the button is let go
-		PlaySequence( BARNACLE_REEL_SEQUENCE );
+		// It swallows for as long as it reels (the sequence loops), or bites
+		// what it has been reeled up to, and goes back to idling as soon as the
+		// button is let go
+		PlaySequence( m_bBiting ? BARNACLE_BITE_SEQUENCE : BARNACLE_REEL_SEQUENCE );
 		SetWeaponIdleTime( gpGlobals->curtime );
 	}
 
@@ -1330,6 +1355,8 @@ void CWeaponBarnacle::ResetTongue( void )
 
 	m_iTip = TIP_FREE;
 	m_bTipOnEntity = false;
+	m_bTipBig = false;
+	m_bBiting = false;
 	m_bTongueOut = false;
 	m_bPayingOut = false;
 	m_bRetracting = false;
@@ -1360,6 +1387,8 @@ void CWeaponBarnacle::StartRetract( void )
 
 	m_iTip = TIP_FREE;
 	m_bTipOnEntity = false;
+	m_bTipBig = false;
+	m_bBiting = false;
 	m_bPayingOut = false;
 
 	// From what is out, not from what could have been
@@ -1387,7 +1416,7 @@ bool CWeaponBarnacle::GetTipPin( Vector *pPin )
 	{
 		*pPin = m_vecTipFixed;
 	}
-	else if ( m_iTip == TIP_PREY && m_iPreyBone >= 0 && pEntity->GetBaseAnimating() )
+	else if ( ( m_iTip == TIP_PREY || m_bTipBig ) && m_iPreyBone >= 0 && pEntity->GetBaseAnimating() )
 	{
 		// (someone alive: the tip goes with the part of them it has)
 		matrix3x4_t matBone;
@@ -1457,6 +1486,7 @@ void CWeaponBarnacle::StickTip( CHL2_Player *pPlayer, const trace_t &tr )
 		!( pPhysics->GetGameFlags() & FVPHYSICS_PLAYER_HELD );
 
 	ClearHold( m_TipHold );
+	m_bTipBig = false;
 	m_TipHold.hEntity = pEntity;
 	m_TipHold.pPhysics = pPhysics;
 	m_TipHold.flMass = flMass;
@@ -1491,7 +1521,8 @@ void CWeaponBarnacle::StickTip( CHL2_Player *pPlayer, const trace_t &tr )
 // The tip has touched something alive. A headcrab is caught and carried. A
 // person, or a zombie hit up where its headcrab sits, is held by the part of
 // them that was hit, and notices; what becomes of them is decided when the
-// tongue is pulled tight (UpdatePrey).
+// tongue is pulled tight (UpdatePrey). Something too big for that holds the
+// player, like a wall that walks, and is bitten when they get to it (BitePrey).
 // False if there is nothing here for the tongue.
 //-----------------------------------------------------------------------------
 bool CWeaponBarnacle::StickToNPC( CHL2_Player *pPlayer, CAI_BaseNPC *pNPC, const trace_t &tr )
@@ -1540,13 +1571,26 @@ bool CWeaponBarnacle::StickToNPC( CHL2_Player *pPlayer, CAI_BaseNPC *pNPC, const
 	m_bPreySnap = bUpper && !( pSoldier && pSoldier->IsElite() );
 	m_bPreyZombie = ( iKind == PREY_ZOMBIE );
 	m_flNextStrain = 0.0f;
+	m_bTipBig = ( iKind == PREY_BIG );
 
-	m_iTip = TIP_PREY;
 	m_bPayingOut = false;
 	EmitSound( "Weapon_Barnacle.Stick" );
 
 	// They know where that came from
 	pNPC->UpdateEnemyMemory( pPlayer, pPlayer->GetAbsOrigin() );
+
+	if ( m_bTipBig )
+	{
+		m_bPreySnap = false;
+		m_iTip = TIP_ANCHORED;
+
+		Vector vecPin;
+		GetTipPin( &vecPin );
+		Anchor( pPlayer, vecPin );
+		return true;
+	}
+
+	m_iTip = TIP_PREY;
 	return true;
 }
 
@@ -1721,6 +1765,38 @@ void CWeaponBarnacle::UpdatePrey( CHL2_Player *pPlayer )
 }
 
 //-----------------------------------------------------------------------------
+// The player has reeled themselves up to an enemy the tongue can't kill, and
+// goes on reeling: the barnacle bites it, for as long as they do. (The user
+// asked for this, and for the tongue to stay on it meanwhile.)
+//-----------------------------------------------------------------------------
+void CWeaponBarnacle::BitePrey( CHL2_Player *pPlayer )
+{
+	CBaseEntity *pEntity = m_TipHold.hEntity;
+	CAI_BaseNPC *pNPC = pEntity ? pEntity->MyNPCPointer() : NULL;
+	if ( pNPC == NULL || !pNPC->IsAlive() )
+		return;
+
+	m_bBiting = true;
+
+	if ( gpGlobals->curtime < m_flNextStrain )
+		return;
+
+	m_flNextStrain = gpGlobals->curtime + BARNACLE_BITE_INTERVAL;
+
+	Vector vecPin;
+	GetTipPin( &vecPin );
+
+	Vector vecDir = pPlayer->EyePosition() - vecPin;
+	VectorNormalize( vecDir );
+	UTIL_BloodImpact( vecPin, vecDir, pNPC->BloodColor(), 4 );
+	EmitSound( "NPC_Barnacle.FinalBite" );
+
+	CTakeDamageInfo info( this, pPlayer, of2_barnacle_bite_damage.GetFloat() * BARNACLE_BITE_INTERVAL, DMG_SLASH );
+	info.SetDamagePosition( vecPin );
+	pNPC->TakeDamage( info );
+}
+
+//-----------------------------------------------------------------------------
 // Pulled tight on a zombie, the tongue takes its headcrab off it. The headcrab
 // is alive and stays on the tip, carried like any other; what is left of the
 // zombie has nothing to drive it, and drops. (The user asked for this to wait
@@ -1849,6 +1925,7 @@ void CWeaponBarnacle::FreeTip( void )
 
 	m_iTip = TIP_FREE;
 	m_bTipOnEntity = false;
+	m_bTipBig = false;
 	m_iPreyBone = -1;
 
 	// Not straight back onto what it just came off
@@ -1866,6 +1943,12 @@ void CWeaponBarnacle::CheckTip( void )
 
 	CBaseEntity *pEntity = m_TipHold.hEntity;
 	bool bGone = ( pEntity == NULL ) || ( m_TipHold.pPhysics && !HasPhysicsObject( pEntity, m_TipHold.pPhysics ) );
+	if ( !bGone && m_bTipBig && !pEntity->IsAlive() )
+	{
+		// (bitten to death, or killed some other way while the tongue had it)
+		bGone = true;
+	}
+
 	if ( bGone )
 	{
 		// Nothing left to let go of
@@ -1950,7 +2033,16 @@ void CWeaponBarnacle::UpdateAnchored( CHL2_Player *pPlayer, const Vector &vecTip
 		// them: the tongue has done what it can, and comes back by itself (the
 		// user asked for this: pulled up over an edge, they had to let go of it
 		// by hand every time)
-		if ( of2_barnacle_auto_release.GetBool() && pPlayer->GetGroundEntity() != NULL &&
+		if ( m_bTipBig )
+		{
+			// On an enemy the tongue stays, however near: there the barnacle
+			// gets its teeth in instead
+			if ( m_Tether.GetPathLength() <= of2_barnacle_bite_range.GetFloat() )
+			{
+				BitePrey( pPlayer );
+			}
+		}
+		else if ( of2_barnacle_auto_release.GetBool() && pPlayer->GetGroundEntity() != NULL &&
 			 m_flLeash <= flFixed + flClosest &&
 			 vecHand.DistTo( m_Tether.GetSwingPoint() ) <= flClosest + BARNACLE_RELEASE_DIST )
 		{
@@ -2541,6 +2633,7 @@ void CWeaponBarnacle::TongueThink( void )
 	}
 
 	CheckTip();
+	m_bBiting = false;
 
 	m_Tether.SetSliding( of2_barnacle_slide_speed.GetFloat(), of2_barnacle_slide_friction.GetFloat() );
 

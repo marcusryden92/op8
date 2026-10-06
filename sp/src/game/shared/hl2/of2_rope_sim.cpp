@@ -30,6 +30,10 @@
 // Share of its speed along a surface a point loses when it touches one
 #define ROPE_FRICTION			0.3f
 
+// Share of what a point is pulled in by that the point before it gives up in
+// speed (see Step). 0: none, and the rope's free end thrashes.
+#define ROPE_FOLLOW_GIVE		0.9f
+
 // How many surfaces a point slides along in one step before it stops
 #define ROPE_SLIDES				2
 
@@ -251,13 +255,26 @@ void COF2RopeSim::Step( const Vector &vecRoot, const Vector &vecWind )
 		// hanging past an edge were hauled in under the floor the root was
 		// carried across; made to stay in sight of the point before, they all
 		// jumped to the edge at once.)
+		//
+		// Done just like that, a point is moved and the one before it feels
+		// nothing of it, which is not how a rope works: every little sway at
+		// the root grew on its way down, and the free end thrashed about on a
+		// rope that was only hanging there. So what a point is moved by is
+		// taken out of the speed of the one before it (ROPE_FOLLOW_GIVE), as
+		// if the one had pulled on the other.
 		for ( int i = 1; i <= iLast; i++ )
 		{
 			Vector vecLink = m_vecPos[i] - m_vecPos[i - 1];
 			float flLink = vecLink.Length();
 			if ( flLink > flSegment && flLink > 0.001f )
 			{
-				m_vecPos[i] = m_vecPos[i - 1] + vecLink * ( flSegment / flLink );
+				Vector vecMoved = vecLink * ( flSegment / flLink - 1.0f );
+				m_vecPos[i] += vecMoved;
+
+				if ( i > 1 )
+				{
+					m_vecPrev[i - 1] += vecMoved * ROPE_FOLLOW_GIVE;
+				}
 			}
 		}
 	}
@@ -297,7 +314,7 @@ void COF2RopeSim::Step( const Vector &vecRoot, const Vector &vecWind )
 		// (if the last try was cut short too, it stays where that one began)
 		trace_t tr;
 		UTIL_TraceLine( vecFrom, vecTo, MASK_SOLID_BRUSHONLY, &filter, &tr );
-		m_vecPos[i] = ( tr.startsolid || tr.fraction == 1.0f ) ? vecTo : vecFrom;
+		m_vecPos[i] = tr.startsolid ? vecStart[i] : ( ( tr.fraction == 1.0f ) ? vecTo : vecFrom );
 
 		// Keep some of the speed along the surface, none into it
 		Vector vecVelocity = m_vecPos[i] - m_vecPrev[i];
