@@ -59,6 +59,10 @@ public:
 
 	bool	IsJumping( void ) { return m_bMidJump; }
 
+	// OF2: held on the tip of the player's Barnacle (weapon_barnacle.cpp), which carries it
+	// about; it only struggles meanwhile. false puts it back on its feet.
+	void	OF2_SetBarnacled( bool bHeld );
+
 	virtual void BiteSound( void ) = 0;
 	virtual void AttackSound( void ) {};
 	virtual void ImpactSound( void ) {};

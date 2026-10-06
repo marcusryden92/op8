@@ -238,6 +238,8 @@ public:
 
 	virtual const char *GetMoanSound( int nSound ) = 0;
 	virtual const char *GetHeadcrabClassname( void ) = 0;
+	// OF2: for the player's Barnacle, which pulls the headcrab off
+	bool OF2_IsHeadless( void ) { return m_fIsHeadless; }
 	virtual const char *GetLegsModel( void ) = 0;
 	virtual const char *GetTorsoModel( void ) = 0;
 	virtual const char *GetHeadcrabModel( void ) = 0;

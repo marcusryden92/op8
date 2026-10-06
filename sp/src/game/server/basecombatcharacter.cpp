@@ -63,6 +63,11 @@ extern int	g_interactionBarnacleVictimReleased;
 
 extern ConVar weapon_showproficiency;
 
+#ifdef HL2_EPISODIC
+// OF2: hl2\weapon_barnacle.cpp
+extern bool OF2_BarnacleWantsCorpses( void );
+#endif
+
 ConVar ai_show_hull_attacks( "ai_show_hull_attacks", "0" );
 ConVar ai_force_serverside_ragdoll( "ai_force_serverside_ragdoll", "0" );
 
@@ -1738,8 +1743,15 @@ bool CBaseCombatCharacter::BecomeRagdoll( const CTakeDamageInfo &info, const Vec
 	bMegaPhyscannonActive = HL2GameRules()->MegaPhyscannonActive();
 #endif // !HL2MP
 
+	// OF2: so does the Barnacle, whose tongue takes hold of bodies. Only of what
+	// can be one; the rest dies as it always did.
+	bool bBarnacleCorpse = false;
+#ifdef HL2_EPISODIC
+	bBarnacleCorpse = !IsPlayer() && CanBecomeServerRagdoll() && OF2_BarnacleWantsCorpses();
+#endif
+
 	// Mega physgun requires everything to be a server-side ragdoll
-	if ( m_bForceServerRagdoll == true || ( ( bMegaPhyscannonActive == true ) && !IsPlayer() && Classify() != CLASS_PLAYER_ALLY_VITAL && Classify() != CLASS_PLAYER_ALLY ) )
+	if ( m_bForceServerRagdoll == true || bBarnacleCorpse || ( ( bMegaPhyscannonActive == true ) && !IsPlayer() && Classify() != CLASS_PLAYER_ALLY_VITAL && Classify() != CLASS_PLAYER_ALLY ) )
 	{
 		if ( CanBecomeServerRagdoll() == false )
 			return false;

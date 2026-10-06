@@ -285,12 +285,42 @@ bool COF2Tether::FindPivot( const Vector &vecFixed, const Vector &vecMoving, con
 	// that one, across the way the line came.
 	Vector vecOut = tr.plane.normal + vecSide;
 	Vector vecEdge = CrossProduct( tr.plane.normal, vecSide );
+
+	// Where the pivot stands off from
+	Vector vecCorner = tr.endpos;
+
 	if ( IsBlocked( vecBlocked, vecFixed, &trTest ) &&
-		 trTest.endpos.DistToSqr( tr.endpos ) < TETHER_EDGE_DIST * TETHER_EDGE_DIST &&
 		 fabs( DotProduct( trTest.plane.normal, tr.plane.normal ) ) < 0.9f )
 	{
-		vecOut = tr.plane.normal + trTest.plane.normal;
-		vecEdge = CrossProduct( tr.plane.normal, trTest.plane.normal );
+		// The two hits are on the two faces, but neither need be at the edge:
+		// a line that only just dips into a face it runs almost along (a tongue
+		// fixed to a floor, its other end going over the floor's edge) hits it
+		// well back from the edge, and the pivot put there left the line
+		// cutting through the corner. The edge itself is where the two faces
+		// meet. Its point nearest the second hit:
+		const Vector &vecFace1 = tr.plane.normal;
+		const Vector &vecFace2 = trTest.plane.normal;
+		float flAcross = DotProduct( vecFace1, vecFace2 );
+		float flOff = DotProduct( vecFace1, tr.endpos - trTest.endpos ) / ( 1.0f - flAcross * flAcross );
+		Vector vecMeet = trTest.endpos + vecFace1 * flOff - vecFace2 * ( flOff * flAcross );
+
+		// (if that is nowhere near the line, the second hit was on something else)
+		bool bMeet = CalcDistanceToLineSegment( vecMeet, vecFixed, vecBlocked ) < TETHER_EDGE_DIST;
+		if ( bMeet || trTest.endpos.DistToSqr( tr.endpos ) < TETHER_EDGE_DIST * TETHER_EDGE_DIST )
+		{
+			vecOut = vecFace1 + vecFace2;
+			vecEdge = CrossProduct( vecFace1, vecFace2 );
+		}
+
+		if ( bMeet )
+		{
+			trace_t trWay;
+			Vector vecTry = vecMeet + vecOut * of2_tether_pivot_offset.GetFloat();
+			if ( !IsBlocked( vecFixed, vecTry, &trWay ) )
+			{
+				vecCorner = vecMeet;
+			}
+		}
 	}
 
 	if ( VectorNormalize( vecEdge ) < 0.01f )
@@ -298,11 +328,11 @@ bool COF2Tether::FindPivot( const Vector &vecFixed, const Vector &vecMoving, con
 		vecEdge.Init();
 	}
 
-	Vector vecPivot = tr.endpos + vecOut * of2_tether_pivot_offset.GetFloat();
+	Vector vecPivot = vecCorner + vecOut * of2_tether_pivot_offset.GetFloat();
 
-	if ( IsBlocked( tr.endpos, vecPivot, &trTest ) )
+	if ( IsBlocked( vecCorner, vecPivot, &trTest ) )
 	{
-		vecPivot = ( tr.endpos + trTest.endpos ) * 0.5f;
+		vecPivot = ( vecCorner + trTest.endpos ) * 0.5f;
 	}
 
 	VectorNormalize( vecOut );

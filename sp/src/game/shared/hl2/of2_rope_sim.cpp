@@ -219,29 +219,45 @@ void COF2RopeSim::Step( const Vector &vecRoot, const Vector &vecWind )
 		}
 	}
 
-	// A few passes over the links leave a long rope looking like rubber, and
-	// one that lies on a roof is hardly dragged along by a root that has gone
-	// over the edge. This doesn't, and it is: no point is further from a held
-	// end than the rope between the two is long.
-	for ( int i = 1; i <= iLast; i++ )
+	// A few passes over the links leave a long rope looking like rubber.
+	if ( m_bEndPinned )
 	{
-		if ( i == iLast && m_bEndPinned )
-			break;
-
-		Vector vecOut = m_vecPos[i] - vecRoot;
-		float flOut = vecOut.Length();
-		if ( flOut > flSegment * i && flOut > 0.001f )
+		// Held at both ends, this doesn't: no point is further from either end
+		// than the rope between the two is long.
+		for ( int i = 1; i < iLast; i++ )
 		{
-			m_vecPos[i] = vecRoot + vecOut * ( flSegment * i / flOut );
-		}
+			Vector vecOut = m_vecPos[i] - vecRoot;
+			float flOut = vecOut.Length();
+			if ( flOut > flSegment * i && flOut > 0.001f )
+			{
+				m_vecPos[i] = vecRoot + vecOut * ( flSegment * i / flOut );
+			}
 
-		if ( m_bEndPinned )
-		{
 			vecOut = m_vecPos[i] - m_vecEndPin;
 			flOut = vecOut.Length();
 			if ( flOut > flSegment * ( iLast - i ) && flOut > 0.001f )
 			{
 				m_vecPos[i] = m_vecEndPin + vecOut * ( flSegment * ( iLast - i ) / flOut );
+			}
+		}
+	}
+	else
+	{
+		// Held at the root only, each point in turn is brought within reach of
+		// the one before it, which stays put. So a pull at the root reaches all
+		// the way down the rope in one step, and reaches each point from the
+		// one before it: round whatever the rope lies over, not straight at the
+		// root through it. (Held to their distance from the root itself, points
+		// hanging past an edge were hauled in under the floor the root was
+		// carried across; made to stay in sight of the point before, they all
+		// jumped to the edge at once.)
+		for ( int i = 1; i <= iLast; i++ )
+		{
+			Vector vecLink = m_vecPos[i] - m_vecPos[i - 1];
+			float flLink = vecLink.Length();
+			if ( flLink > flSegment && flLink > 0.001f )
+			{
+				m_vecPos[i] = m_vecPos[i - 1] + vecLink * ( flSegment / flLink );
 			}
 		}
 	}

@@ -1322,8 +1322,14 @@ float OF2_TetherMinLength( void )
 
 float OF2_TetherHandHeight( CBasePlayer *pPlayer )
 {
-	// Inside the player's box when ducked too
-	return MIN( of2_tether_hand_height.GetFloat(), pPlayer->GetPlayerMaxs().z - 8.0f );
+	// As far below the eyes as it is standing up, so that it comes down with
+	// them in a crouch, as smoothly as the view does. (It only dropped to just
+	// inside the crouched box before, which is where the crouched eyes are: the
+	// rope was held in front of the face.)
+	float flHeight = of2_tether_hand_height.GetFloat() - ( VEC_VIEW.z - pPlayer->GetViewOffset().z );
+
+	// Inside the player's box, and off the ground
+	return clamp( flHeight, 8.0f, MAX( pPlayer->GetPlayerMaxs().z - 8.0f, 8.0f ) );
 }
 
 //-----------------------------------------------------------------------------

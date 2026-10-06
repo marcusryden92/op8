@@ -1941,7 +1941,8 @@ int CBaseHeadcrab::SelectSchedule( void )
 		return SCHED_HEADCRAB_HOP_RANDOMLY;
 	}
 
-	if ( HasCondition( COND_HEADCRAB_BARNACLED ) )
+	// OF2: also on the tip of the player's Barnacle (OF2_SetBarnacled)
+	if ( HasCondition( COND_HEADCRAB_BARNACLED ) || IsEFlagSet( EFL_IS_BEING_LIFTED_BY_BARNACLE ) )
 	{
 		// Caught by a barnacle!
 		return SCHED_HEADCRAB_BARNACLED;
@@ -2111,6 +2112,39 @@ void CBaseHeadcrab::Ignite( float flFlameLifetime, bool bNPCOnly, float flSize, 
 // Output :	 true  - if sub-class has a response for the interaction
 //			 false - if sub-class has no response
 //-----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------
+// OF2: caught by, or let go by, the player's Barnacle. Held, it is moved by
+// the weapon every tick and does nothing itself but struggle
+// (SCHED_HEADCRAB_BARNACLED, which nothing in the stock game ever started).
+//-----------------------------------------------------------------------------
+void CBaseHeadcrab::OF2_SetBarnacled( bool bHeld )
+{
+	if ( bHeld )
+	{
+		// (it may have been caught in mid-leap)
+		SetTouch( NULL );
+		m_bMidJump = false;
+
+		AddEFlags( EFL_IS_BEING_LIFTED_BY_BARNACLE );
+		AddSolidFlags( FSOLID_NOT_SOLID );
+		SetMoveType( MOVETYPE_NONE );
+		SetGroundEntity( NULL );
+		SetAbsVelocity( vec3_origin );
+	}
+	else
+	{
+		RemoveEFlags( EFL_IS_BEING_LIFTED_BY_BARNACLE );
+		RemoveSolidFlags( FSOLID_NOT_SOLID );
+		SetMoveType( MOVETYPE_STEP );
+
+		// Dropped wherever it was: it falls from there
+		SetGroundEntity( NULL );
+		SetAbsVelocity( vec3_origin );
+	}
+
+	ClearSchedule( "OF2: Barnacle" );
+}
+
 bool CBaseHeadcrab::HandleInteraction(int interactionType, void *data, CBaseCombatCharacter* sourceEnt)
 {
 	if (interactionType == g_interactionBarnacleVictimDangle)
