@@ -240,6 +240,10 @@ private:
 float	OF2_GetPlayerVisibility( CBasePlayer *pPlayer );
 void	OF2_SetPlayerVisibility( CBasePlayer *pPlayer, float flVisibility );
 
+// How far the noise the player is making carries, as 0-1 for the HUD: nothing, to a
+// gunshot. Call once a tick; it holds a peak for a moment so that a single sound shows.
+float	OF2_GetPlayerNoise( CBasePlayer *pPlayer );
+
 // Something has a light on the player (a metrocop's flashlight): fully visible
 // to everyone for this long
 void	OF2_PlayerLit( float flDuration );

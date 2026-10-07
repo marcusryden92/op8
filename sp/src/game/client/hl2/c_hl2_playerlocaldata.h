@@ -44,6 +44,8 @@ public:
 #ifdef HL2_EPISODIC
 	float	m_flFlashBattery;
 	bool	m_bNightVision;		// OF2: night vision replaces the flashlight
+	float	m_flStealthLight;	// OF2: stealth meters (hud_stealth.cpp), both 0-1
+	float	m_flStealthNoise;
 	Vector	m_vecLocatorOrigin;
 
 	// OF2: tether hang (climb rope, Barnacle); see hl2_playerlocaldata.h

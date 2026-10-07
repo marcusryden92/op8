@@ -1166,6 +1166,59 @@ float OF2_GetPlayerVisibility( CBasePlayer *pPlayer )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: The loudest thing the player is doing, for the HUD. The same sounds
+//			NPCs hear: the reserved one for moving about (as far as it carries
+//			to stealth NPCs) and anything else of the player's in the sound
+//			list (landing, the knife, gunfire). On a log scale, since footsteps
+//			carry tens of units and a shot thousands. A thrown prop's noise is
+//			the prop's own and is not in this.
+//-----------------------------------------------------------------------------
+#define STEALTH_NOISE_METER_MIN		30.0f	// radius that shows as nothing
+#define STEALTH_NOISE_METER_MAX		3000.0f	// radius that fills the meter
+#define STEALTH_NOISE_METER_DECAY	0.9f	// how fast a peak falls, in meters a second
+
+float OF2_GetPlayerNoise( CBasePlayer *pPlayer )
+{
+	static float s_flNoise = 0.0f;
+	static float s_flNoiseTime = 0.0f;
+
+	float flRadius = 0.0f;
+
+	CSound *pBodySound = PlayerBodySound();
+	if ( pBodySound )
+	{
+		flRadius = pBodySound->Volume() * of2_stealth_hear_footsteps.GetFloat();
+	}
+
+	for ( int iSound = CSoundEnt::ActiveList(); iSound != SOUNDLIST_EMPTY; )
+	{
+		CSound *pSound = CSoundEnt::SoundPointerForIndex( iSound );
+		if ( !pSound )
+			break;
+
+		if ( pSound != pBodySound && pSound->FIsSound() && pSound->m_hOwner.Get() == pPlayer )
+		{
+			flRadius = MAX( flRadius, (float)pSound->Volume() );
+		}
+
+		iSound = pSound->NextSound();
+	}
+
+	float flLevel = 0.0f;
+	if ( flRadius > STEALTH_NOISE_METER_MIN )
+	{
+		flLevel = clamp( log( flRadius / STEALTH_NOISE_METER_MIN ) / log( STEALTH_NOISE_METER_MAX / STEALTH_NOISE_METER_MIN ), 0.0f, 1.0f );
+	}
+
+	// (The clock goes back on a load)
+	float dt = clamp( gpGlobals->curtime - s_flNoiseTime, 0.0f, 0.5f );
+	s_flNoiseTime = gpGlobals->curtime;
+	s_flNoise = MAX( flLevel, s_flNoise - STEALTH_NOISE_METER_DECAY * dt );
+
+	return s_flNoise;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: Noise from a prop hitting something
 //-----------------------------------------------------------------------------
 void OF2_PropImpactNoise( CBaseEntity *pProp, int index, gamevcollisionevent_t *pEvent, float &flNextTime )

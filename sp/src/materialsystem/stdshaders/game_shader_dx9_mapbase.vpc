@@ -64,6 +64,8 @@ $Project
 		
 		$File	"engine_post_dx9.cpp"
 		$File	"depthoffield_dx9.cpp"
+		$File	"of2_lightmappedgeneric.cpp"
+		$File	"of2_lightcone_dx9.cpp"
 		
 		$File	"core_dx9.cpp"
 	}

@@ -1231,6 +1231,12 @@ void CHL2_Player::PostThink( void )
 {
 	BaseClass::PostThink();
 
+#ifdef HL2_EPISODIC
+	// OF2: Stealth meters on the HUD
+	m_HL2Local.m_flStealthLight = OF2_GetPlayerVisibility( this );
+	m_HL2Local.m_flStealthNoise = OF2_GetPlayerNoise( this );
+#endif
+
 	if ( !g_fGameOver && !IsPlayerLockedInPlace() && IsAlive() )
 	{
 		 HandleAdmireGlovesAnimation();

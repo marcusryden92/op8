@@ -504,7 +504,7 @@ DECLARE_HUDELEMENT( CHudSecondaryAmmo );
 
 //-----------------------------------------------------------------------------
 // Purpose: OF2: fire mode of a weapon with a selector (Alyx's gun): one round
-//			for single fire, three for bursts (one over the other), "AUTO" for
+//			for single fire, three smaller ones side by side for bursts, "AUTO" for
 //			automatic. The round is the pistol's ammo icon, as on the pickup
 //			list: a character of the Half-Life 2 icon font. It keeps
 //			its place beside the ammo counter, which moves from weapon to weapon.
@@ -530,6 +530,7 @@ private:
 	// The round: a character of an icon font. The font's line is much taller than the
 	// drawing in it, so the layout says where in the line the drawing is.
 	CPanelAnimationVar( vgui::HFont, m_hIconFont, "IconFont", "WeaponIconsSmall" );
+	CPanelAnimationVar( vgui::HFont, m_hBurstIconFont, "BurstIconFont", "WeaponIconsBurst" );	// the same, smaller: a burst's three
 	CPanelAnimationStringVar( 8, m_szIconChar, "IconChar", "p" );
 	CPanelAnimationVar( float, m_flIconInkTop, "IconInkTop", "0.43" );		// top of the line to the top of the drawing, as a part of the line's height
 	CPanelAnimationVar( float, m_flIconInkTall, "IconInkTall", "0.15" );	// height of the drawing, the same way
@@ -639,24 +640,26 @@ void CHudFireMode::Paint()
 	}
 
 	// Where the drawing is inside the character, in whole pixels
+	// The rounds of a burst are smaller (their own font), so that three fit side by side
+	vgui::HFont hFont = ( roundCount > 1 ) ? m_hBurstIconFont : m_hIconFont;
 	wchar_t wchIcon = (wchar_t)m_szIconChar[0];
-	int fontTall = surface()->GetFontTall( m_hIconFont );
+	int fontTall = surface()->GetFontTall( hFont );
 	int inkTop = RoundFloatToInt( m_flIconInkTop * fontTall );
 	int inkTall = MAX( 1, RoundFloatToInt( m_flIconInkTall * fontTall ) );
 	int roundGap = MAX( 1, RoundFloatToInt( m_flRoundGap ) );
 
 	int inkLeft, inkWide, inkRight;
-	surface()->GetCharABCwide( m_hIconFont, wchIcon, inkLeft, inkWide, inkRight );
+	surface()->GetCharABCwide( hFont, wchIcon, inkLeft, inkWide, inkRight );
 
-	int columnTall = roundCount * inkTall + ( roundCount - 1 ) * roundGap;
-	int xpos = ( GetWide() - inkWide ) / 2 - inkLeft, ypos = ( GetTall() - columnTall ) / 2 - inkTop;
+	int rowWide = roundCount * inkWide + ( roundCount - 1 ) * roundGap;
+	int xpos = ( GetWide() - rowWide ) / 2 - inkLeft, ypos = ( GetTall() - inkTall ) / 2 - inkTop;
 
-	surface()->DrawSetTextFont( m_hIconFont );
+	surface()->DrawSetTextFont( hFont );
 	surface()->DrawSetTextColor( clrFireMode );
 	for ( int i = 0; i < roundCount; i++ )
 	{
 		surface()->DrawSetTextPos( xpos, ypos );
 		surface()->DrawUnicodeChar( wchIcon );
-		ypos += ( inkTall + roundGap );
+		xpos += ( inkWide + roundGap );
 	}
 }

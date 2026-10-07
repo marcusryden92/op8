@@ -1,0 +1,8 @@
+//
+// OF2: the shader model 3 builds of the shaders in of2_dx9_20b.txt that have one
+// (buildof2shaders.bat compiles this list with -dx9_30 -force30).
+//
+
+// The flashlight pass on world brushes
+SDK_flashlight_ps2x.fxc
+SDK_lightmappedgeneric_flashlight_vs20.fxc

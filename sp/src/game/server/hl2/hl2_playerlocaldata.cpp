@@ -31,6 +31,8 @@ BEGIN_SEND_TABLE_NOBASE( CHL2PlayerLocalData, DT_HL2Local )
 #ifdef HL2_EPISODIC
 	SendPropFloat( SENDINFO(m_flFlashBattery) ),
 	SendPropBool( SENDINFO(m_bNightVision) ),	// OF2
+	SendPropFloat( SENDINFO(m_flStealthLight), 8, SPROP_UNSIGNED, 0.0f, 1.0f ),	// OF2
+	SendPropFloat( SENDINFO(m_flStealthNoise), 8, SPROP_UNSIGNED, 0.0f, 1.0f ),
 	SendPropVector( SENDINFO(m_vecLocatorOrigin) ),
 	// OF2: tether hang
 	SendPropBool( SENDINFO(m_bOnTether) ),
@@ -95,6 +97,8 @@ CHL2PlayerLocalData::CHL2PlayerLocalData()
 #ifdef HL2_EPISODIC
 	m_flFlashBattery = 0.0f;
 	m_bNightVision = false;	// OF2
+	m_flStealthLight = 1.0f;
+	m_flStealthNoise = 0.0f;
 
 	// OF2: tether hang
 	m_bOnTether = false;

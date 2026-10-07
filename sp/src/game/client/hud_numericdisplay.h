@@ -17,6 +17,61 @@
 void OF2_PaintBackdrop( int x0, int y0, int x1, int y1, float flAlpha );
 
 //-----------------------------------------------------------------------------
+// Purpose: OF2: a vector icon in the HUD's style: a closed outline, with
+//			horizontal segments inside it lit from the bottom up to a fill level,
+//			like the crosshair brackets, and a glow. pPoints is the outline in
+//			0..1 units of the icon box, which is flAspect times as wide as it is
+//			tall. Call Paint() from a panel's Paint(); one of these per icon, since
+//			it keeps the two textures the icon is rasterized into (shape, glow)
+//			and rebuilds them only when what they show changes.
+//			Used for the health plus and the suit shield (CHudNumericDisplay) and
+//			for the small icons of the night vision / stealth panel.
+//-----------------------------------------------------------------------------
+// One part of a line art icon (COF2HudIcon::PaintLineArt). Points are in 0..1 of the icon box.
+enum
+{
+	OF2_ICON_OUTLINE,	// closed polygon, the stroke inside it; hides what is behind it
+	OF2_ICON_RING,		// likewise, a circle
+	OF2_ICON_LINE,		// open line through the points, the stroke centered on it, round ends;
+						// the points are put on whole pixels, for straight pieces
+	OF2_ICON_CURVE,		// the same with the points left where they are, for curves
+};
+
+struct OF2IconPart_t
+{
+	int nKind;
+	const Vector2D *pPoints;
+	int nPoints;
+	float flCenterX, flCenterY;	// ring: its middle, in 0..1 of the box
+	float flDiameter;			// ring: as a part of the box's height
+};
+
+class COF2HudIcon
+{
+public:
+	COF2HudIcon();
+
+	// Positions and sizes in pixels. flGlow: strength of the glow, 0..1. flFill: 0..1, or negative
+	// for the outline alone, with no segments inside.
+	void Paint( const Vector2D *pPoints, int nPoints, float flX, float flTop, float flTall, float flAspect,
+		float flStroke, float flCornerRadius, float flGlowRadius, float flGlow, float flFill, Color clr );
+
+	// Line art made of several parts, listed back to front: a closed one hides what is behind it,
+	// so nothing shows through a shape that lies over another.
+	void PaintLineArt( const OF2IconPart_t *pParts, int nParts, float flX, float flTop, float flTall, float flAspect,
+		float flStroke, float flCornerRadius, float flGlowRadius, float flGlow, Color clr );
+
+private:
+	void SetTextures( const float *pShape, const float *pGlow, int wide, int tall, int originY, int brightParity );
+	void Draw( float flGlow, Color clr );
+
+	int m_nTexture;
+	int m_nGlowTexture;
+	int m_Key[8];
+	int m_iX, m_iY, m_iWide, m_iTall;
+};
+
+//-----------------------------------------------------------------------------
 // Purpose: Base class for all the hud elements that are just a numeric display
 //			with some options for text and icons
 //-----------------------------------------------------------------------------
@@ -92,12 +147,7 @@ protected:
 	CPanelAnimationVarAliasType( float, icon_glow_radius, "icon_glow_radius", "1.5", "proportional_float" );
 
 private:
-	// The icon is rasterized into two textures (shape, glow) that are rebuilt only
-	// when what they show changes (m_IconKey)
-	int m_nIconTexture;
-	int m_nIconGlowTexture;
-	int m_IconKey[8];
-	int m_iIconX, m_iIconY, m_iIconWide, m_iIconTall;
+	COF2HudIcon m_Icon;
 };
 
 

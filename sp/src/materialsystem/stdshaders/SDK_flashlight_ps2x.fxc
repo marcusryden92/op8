@@ -130,6 +130,13 @@ float4 main( PS_INPUT i ) : COLOR
 		else
 		{
 #else
+	// OF2: Nothing outside the projection, as SDK_lightmappedgeneric_flashlight_ps2x has it. Without
+	// this the light also lands, mirrored, on what is behind it: dividing by a negative w still gives
+	// a place in the picture. Behind the light z/w is above 1, which is what the second line catches.
+	clip( vProjCoords.xyz );
+#if defined( SHADER_MODEL_PS_2_B ) || defined( SHADER_MODEL_PS_3_0 )
+	clip( 1-vProjCoords.xyz );
+#endif
 	spotColor = tex2D( SpotSampler, vProjCoords );
 #endif
 

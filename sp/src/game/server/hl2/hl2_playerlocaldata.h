@@ -43,6 +43,9 @@ public:
 #ifdef HL2_EPISODIC
 	CNetworkVar( float, m_flFlashBattery );
 	CNetworkVar( bool,	m_bNightVision );	// OF2: night vision replaces the flashlight
+	// OF2: Stealth, for the HUD meters (hud_stealth.cpp), both 0-1. Worked out every tick; not saved.
+	CNetworkVar( float,	m_flStealthLight );	// how visible the light makes the player
+	CNetworkVar( float,	m_flStealthNoise );	// how far the noise the player makes carries
 	CNetworkVar( Vector, m_vecLocatorOrigin );
 
 	// OF2: tether hang (climb rope, Barnacle). Whatever the player hangs from fills

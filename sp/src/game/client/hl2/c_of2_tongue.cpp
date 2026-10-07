@@ -1,9 +1,9 @@
 //========= Opposing Force 2 ==================================================//
 //
 // Purpose: OF2: draws the Barnacle's tongue (server\hl2\weapon_barnacle.cpp).
-//			The server says where it runs: the points of its loose part, and
-//			the places between that and the barnacle where it bends over an
-//			edge. Here it is drawn as one curved tube through all of them
+//			The server says where it runs: its points, and the edges the
+//			straight way to its tip goes over. Here it is drawn as one curved
+//			tube through the points, round the edges it lies against
 //			(of2_curve.cpp), from the barnacle in the player's hand, with the
 //			texture stretched once over its whole length, shaded by the light
 //			around it, and ending in a blob.
@@ -25,7 +25,7 @@
 // The server never lets it get longer than of2_barnacle_max_length is likely to be set
 #define TONGUE_RENDER_RADIUS	2048.0f
 
-ConVar of2_tongue_smooth( "of2_tongue_smooth", "3", FCVAR_NONE, "How many pieces the Barnacle's tongue is drawn in between two of its points. 1 draws straight lines." );
+ConVar of2_tongue_smooth( "of2_tongue_smooth", "6", FCVAR_NONE, "How many pieces the Barnacle's tongue is drawn in between two of its points. 1 draws straight lines." );
 ConVar of2_tongue_shine( "of2_tongue_shine", "1.4", FCVAR_NONE, "Strength of the wet highlight along the Barnacle's tongue, as a multiple of the light where it is: over 1 it burns out to white in good light. 0 turns it off." );
 ConVar of2_tongue_shine_width( "of2_tongue_shine_width", "0.45", FCVAR_NONE, "Width of the highlight along the Barnacle's tongue, as a share of the tongue's." );
 ConVar of2_tongue_shine_follow( "of2_tongue_shine_follow", "1", FCVAR_NONE, "How far the highlight on the Barnacle's tongue moves towards the side the light comes from. 0 keeps it down the middle." );
@@ -61,13 +61,13 @@ public:
 	virtual bool	ShouldInterpolate( void ) { return true; }
 
 private:
-	// The loose part, from the tip back to where it starts; m_nNodes of them
-	// (the more the longer it is). The rest of the list is all at the start.
+	// The tongue, from the tip back to the barnacle; m_nNodes of them
+	// (the more the longer it is). The rest of the list is all at the barnacle.
 	Vector	m_vecNodes[OF2_TONGUE_NODES];
 	CInterpolatedVarArray< Vector, OF2_TONGUE_NODES > m_iv_vecNodes;
 	int		m_nNodes;
 
-	// From where the loose part starts back to the barnacle
+	// The edges the straight way from the barnacle to the tip goes over
 	Vector	m_vecBends[OF2_TONGUE_MAX_BENDS];
 	int		m_nBends;
 	float	m_flWidth;
@@ -119,8 +119,8 @@ int C_OF2Tongue::DrawModel( int flags )
 		m_ShineMaterial.Init( TONGUE_SHINE_MATERIAL, TEXTURE_GROUP_OTHER );
 	}
 
-	// From the barnacle, wherever the view has it this frame, over the bends
-	// and along the loose part to the tip
+	// From the barnacle, wherever the view has it this frame, along the points
+	// to the tip
 	Vector vecPoints[1 + OF2_TONGUE_MAX_BENDS + OF2_TONGUE_NODES];
 	bool bBend[1 + OF2_TONGUE_MAX_BENDS + OF2_TONGUE_NODES];
 	int nPoints = 0;
@@ -130,30 +130,71 @@ int C_OF2Tongue::DrawModel( int flags )
 	bBend[nPoints] = false;
 	nPoints++;
 
-	int nBends = clamp( m_nBends, 0, OF2_TONGUE_MAX_BENDS );
-	for ( int i = nBends - 1; i >= 0; i-- )
-	{
-		vecPoints[nPoints] = m_vecBends[i];
-		bBend[nPoints] = true;
-		nPoints++;
-	}
-
 	int nNodes = clamp( m_nNodes, 0, OF2_TONGUE_NODES );
 	if ( nNodes < 2 )
 		return 0;
 
-	// The loose part starts at the last bend, or at the barnacle if there is
-	// none. In that case the server had the barnacle where it was a tick or
-	// two ago, and the view has moved since. The points are carried along with
-	// it, each by its share: all of the way at the barnacle, none at the tip.
-	// For a tongue pulled straight that is exactly where they belong, so it
-	// stays straight however the view turns.
-	Vector vecCarry = ( nBends == 0 ) ? vecMouth - m_vecNodes[nNodes - 1] : vec3_origin;
+	// The server had the barnacle where it was a tick or two ago, and the view
+	// has moved since. The points are carried along with it, each by its
+	// share: all of the way at the barnacle, none at the tip. For a tongue
+	// pulled straight that is exactly where they belong, so it stays straight
+	// however the view turns.
+	Vector vecCarry = vecMouth - m_vecNodes[nNodes - 1];
+	float flTotal = 0.0f;
 	for ( int i = nNodes - 2; i >= 0; i-- )
 	{
 		float flShare = (float)i / ( nNodes - 1 );
 		vecPoints[nPoints] = m_vecNodes[i] + vecCarry * flShare;
 		bBend[nPoints] = false;
+		flTotal += vecPoints[nPoints].DistTo( vecPoints[nPoints - 1] );
+		nPoints++;
+	}
+
+	// The points only know about the world one by one, so where the tongue lies
+	// over an edge the line from the last point before it to the first one after
+	// cuts the corner. The server knows where the edges are that the straight
+	// way to the tip goes over; where the tongue passes within a point's spacing
+	// of one, it is drawn going out to it and round it. (Further off, it is
+	// still in the air over that edge, or lies over it somewhere else.)
+	float flSpacing = MAX( flTotal / ( nPoints - 1 ), 4.0f );
+	int nBends = clamp( m_nBends, 0, OF2_TONGUE_MAX_BENDS );
+	for ( int b = 0; b < nBends; b++ )
+	{
+		int iLink = -1;
+		float flBest = flSpacing;
+		Vector vecAt;
+		for ( int i = 0; i < nPoints - 1; i++ )
+		{
+			// (not one put in for another edge)
+			if ( bBend[i] && bBend[i + 1] )
+				continue;
+
+			Vector vecClosest;
+			CalcClosestPointOnLineSegment( m_vecBends[b], vecPoints[i], vecPoints[i + 1], vecClosest );
+			float flDist = vecClosest.DistTo( m_vecBends[b] );
+			if ( flDist < flBest )
+			{
+				flBest = flDist;
+				iLink = i;
+				vecAt = vecClosest;
+			}
+		}
+
+		if ( iLink < 0 )
+			continue;
+
+		// All the way out to the edge from half a spacing in; less from further
+		// off, so that it doesn't jump there as the tongue comes down on it
+		float flPull = clamp( 2.0f - 2.0f * flBest / flSpacing, 0.0f, 1.0f );
+
+		for ( int i = nPoints; i > iLink + 1; i-- )
+		{
+			vecPoints[i] = vecPoints[i - 1];
+			bBend[i] = bBend[i - 1];
+		}
+
+		vecPoints[iLink + 1] = vecAt + ( m_vecBends[b] - vecAt ) * flPull;
+		bBend[iLink + 1] = true;
 		nPoints++;
 	}
 

@@ -607,8 +607,9 @@ private:
 	bool			m_bFlashlightOn;
 	float			m_flAmbientLight;		// brightness where it stands, from the client; below 0 until the first report
 	float			m_flFlashlightOffTime;	// stays on this long after calming down
-	EHANDLE			m_hFlashlight;			// the beam (not saved; made again after a load)
+	EHANDLE			m_hFlashlight;			// the cone of light in the air, of2_lightcone (not saved; made again after a load)
 	EHANDLE			m_hFlashlightEnd;		// "spotlight_end": the pool of light where it lands
+	EHANDLE			m_hFlashlightProjected;	// env_projectedtexture, instead of those two (of2_police_flashlight_projected)
 	bool			m_bFlashlightOnSpot;	// the beam is on the place it last knew the player to be
 	EHANDLE			m_hFlashlightGlow;		// sprite on the side of the head
 

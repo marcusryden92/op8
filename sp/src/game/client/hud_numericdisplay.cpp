@@ -34,11 +34,6 @@ CHudNumericDisplay::CHudNumericDisplay(vgui::Panel *parent, const char *name) : 
 	m_bDisplaySecondaryValue = false;
 	m_bIndent = false;
 	m_bIsTime = false;
-
-	m_nIconTexture = -1;
-	m_nIconGlowTexture = -1;
-	V_memset( m_IconKey, 0, sizeof( m_IconKey ) );
-	m_iIconX = m_iIconY = m_iIconWide = m_iIconTall = 0;
 }
 
 //-----------------------------------------------------------------------------
@@ -438,42 +433,45 @@ static void IconBoxBlur( float *pData, int wide, int tall, int r, bool bColumns 
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: OF2: icon outline plus segments inside it, lit bottom-up to flFill,
+// Purpose: OF2: COF2HudIcon. Icon outline plus segments inside it, lit bottom-up to flFill,
 //			with a glow. The shape is rasterized (anti-aliased, scanlined) into a
 //			texture, and a blurred copy into a second one; both are rebuilt only
 //			when something they show changes. The color and glow strength are
 //			applied when drawing, so animations cost nothing.
+//			flX, flTop and flTall are in pixels, in the panel being painted;
+//			stroke, corner radius and glow radius likewise.
 //-----------------------------------------------------------------------------
-void CHudNumericDisplay::PaintIcon( const Vector2D *pPoints, int nPoints, float flAspect, float flFill, Color clr )
+COF2HudIcon::COF2HudIcon()
+{
+	m_nTexture = -1;
+	m_nGlowTexture = -1;
+	V_memset( m_Key, 0, sizeof( m_Key ) );
+	m_iX = m_iY = m_iWide = m_iTall = 0;
+}
+
+void COF2HudIcon::Paint( const Vector2D *pPoints, int nPoints, float flX, float flTop, float flTall, float flAspect,
+	float flStroke, float flCornerRadius, float flGlowRadius, float flGlow, float flFill, Color clr )
 {
 	if ( nPoints < 3 || nPoints > ICON_MAX_POINTS )
 		return;
 
-	// Icon box: from the layout, or matched to the digits (on their baseline, digit height)
-	float flTall = icon_tall;
-	float flTop = icon_ypos;
-	if ( flTall <= 0.0f )
-	{
-		flTall = m_flIconDigitRatio * surface()->GetFontTall( m_hNumberFont );
-		flTop = digit_ypos + surface()->GetFontAscent( m_hNumberFont, L'0' ) - flTall;
-	}
 	const float flWide = flTall * flAspect;
 
 	// Same segment sizes as the crosshair brackets
 	const float flScale = ScreenHeight() / 480.0f;
-	const int stroke   = MAX( 1, (int)( icon_stroke + 0.5f ) );
+	const int stroke   = MAX( 1, (int)( flStroke + 0.5f ) );
 	const int segThick = MAX( 1, (int)( 0.5f * flScale + 0.5f ) );
 	const int segGap   = MAX( 1, (int)( 0.25f * flScale + 0.5f ) );
 	const int rimGap   = segGap;
 	const int pitch    = segThick + segGap;
 	const int inset    = stroke + rimGap; // outline edge to segment area
-	const int glowRadius = MAX( 1, (int)( icon_glow_radius + 0.5f ) );
+	const int glowRadius = MAX( 1, (int)( flGlowRadius + 0.5f ) );
 
 	// Outline snapped to whole pixels so straight edges stay crisp
 	Vector2D outer[ICON_MAX_POINTS], inner[ICON_MAX_POINTS], area[ICON_MAX_POINTS];
 	for ( int i = 0; i < nPoints; i++ )
 	{
-		outer[i].Init( (int)( icon_xpos + pPoints[i].x * flWide + 0.5f ), (int)( flTop + pPoints[i].y * flTall + 0.5f ) );
+		outer[i].Init( (int)( flX + pPoints[i].x * flWide + 0.5f ), (int)( flTop + pPoints[i].y * flTall + 0.5f ) );
 	}
 
 	// The segment stack builds up from the bottom of the segment area
@@ -519,7 +517,7 @@ void CHudNumericDisplay::PaintIcon( const Vector2D *pPoints, int nPoints, float 
 	IconInsetPolygon( outer, nPoints, inset, area );
 
 	// Rounded corners, each outline with its matching radius
-	const float flCorner = MAX( 0.0f, (float)icon_corner_radius );
+	const float flCorner = MAX( 0.0f, flCornerRadius );
 	Vector2D outerR[ICON_MAX_ROUNDED], innerR[ICON_MAX_ROUNDED], areaR[ICON_MAX_ROUNDED];
 	const int nOuterR = IconRoundPolygon( outer, nPoints, flCorner, 0.0f, outerR );
 	const int nInnerR = IconRoundPolygon( inner, nPoints, flCorner, stroke, innerR );
@@ -530,7 +528,8 @@ void CHudNumericDisplay::PaintIcon( const Vector2D *pPoints, int nPoints, float 
 	for ( int i = 0; i < nAreaR; i++ )
 		flAreaMinY = MIN( flAreaMinY, areaR[i].y );
 	const int areaTop = (int)ceil( flAreaMinY - 0.001f );
-	const int nSegments = MAX( 0, ( stackBottom - areaTop + segGap ) / pitch );
+	// (A negative fill: the outline alone, as line art)
+	const int nSegments = ( flFill < 0.0f ) ? 0 : MAX( 0, ( stackBottom - areaTop + segGap ) / pitch );
 	const int nLit = (int)( clamp( flFill, 0.0f, 1.0f ) * nSegments + 0.5f );
 
 	// Scanlines phased so the segment rows are bright, as on the brackets
@@ -550,10 +549,10 @@ void CHudNumericDisplay::PaintIcon( const Vector2D *pPoints, int nPoints, float 
 
 	// Rebuild the textures only when something they show changed
 	const int key[8] = { originX, originY, wide, tall, nLit, nSegments, stroke * 1000 + (int)( flCorner * 100.0f ), (int)(intp)pPoints };
-	if ( m_nIconTexture == -1 || V_memcmp( key, m_IconKey, sizeof( key ) ) )
+	if ( m_nTexture == -1 || V_memcmp( key, m_Key, sizeof( key ) ) )
 	{
-		V_memcpy( m_IconKey, key, sizeof( key ) );
-		m_iIconX = originX; m_iIconY = originY; m_iIconWide = wide; m_iIconTall = tall;
+		V_memcpy( m_Key, key, sizeof( key ) );
+		m_iX = originX; m_iY = originY;
 
 		CUtlVector<float> shape, glow;
 		shape.SetCount( wide * tall );
@@ -616,58 +615,240 @@ void CHudNumericDisplay::PaintIcon( const Vector2D *pPoints, int nPoints, float 
 			IconBoxBlur( glow.Base(), wide, tall, glowRadius, true );
 		}
 
-		// White images with coverage as alpha; the color is applied when drawing.
-		// Padded to power-of-two sizes: the engine stores textures that way, and an
-		// odd-sized image would be squashed into part of the texture when drawn.
-		int texWide = 1, texTall = 1;
-		while ( texWide < wide ) texWide <<= 1;
-		while ( texTall < tall ) texTall <<= 1;
-		m_iIconWide = texWide;
-		m_iIconTall = texTall;
-
-		CUtlVector<unsigned char> rgbaShape, rgbaGlow;
-		rgbaShape.SetCount( texWide * texTall * 4 );
-		rgbaGlow.SetCount( texWide * texTall * 4 );
-		V_memset( rgbaShape.Base(), 0, rgbaShape.Count() ); // transparent padding
-		V_memset( rgbaGlow.Base(), 0, rgbaGlow.Count() );
-		for ( int row = 0; row < tall; row++ )
-		{
-			const float flRowScale = ( ( ( originY + row ) & 1 ) == brightParity ) ? 1.0f : ICON_SCANLINE_DIM;
-			for ( int x = 0; x < wide; x++ )
-			{
-				const int i = row * wide + x;
-				const int t = row * texWide + x;
-				unsigned char *pShape = &rgbaShape[t * 4], *pGlow = &rgbaGlow[t * 4];
-				pShape[0] = pShape[1] = pShape[2] = 255;
-				pShape[3] = (unsigned char)( clamp( shape[i], 0.0f, 1.0f ) * flRowScale * 255.0f );
-				pGlow[0] = pGlow[1] = pGlow[2] = 255;
-				pGlow[3] = (unsigned char)( clamp( glow[i] * ICON_GLOW_GAIN, 0.0f, 1.0f ) * flRowScale * 255.0f );
-			}
-		}
-
-		if ( m_nIconTexture == -1 )
-		{
-			m_nIconTexture = surface()->CreateNewTextureID( true );
-			m_nIconGlowTexture = surface()->CreateNewTextureID( true );
-		}
-		surface()->DrawSetTextureRGBA( m_nIconTexture, rgbaShape.Base(), texWide, texTall, false, true );
-		surface()->DrawSetTextureRGBA( m_nIconGlowTexture, rgbaGlow.Base(), texWide, texTall, false, true );
+		SetTextures( shape.Base(), glow.Base(), wide, tall, originY, brightParity );
 	}
 
-	// Glow first, pulsing with Blur like the digit glow (it rests at 0.6)
-	const float flGlow = clamp( m_flIconGlow * m_flBlur / 0.6f, 0.0f, 1.0f );
+	Draw( flGlow, clr );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: OF2: line art of several parts, back to front. Each is rasterized
+//			on its own, and what a closed one covers is taken out of the ones before it.
+//-----------------------------------------------------------------------------
+void COF2HudIcon::PaintLineArt( const OF2IconPart_t *pParts, int nParts, float flX, float flTop, float flTall, float flAspect,
+	float flStroke, float flCornerRadius, float flGlowRadius, float flGlow, Color clr )
+{
+	if ( nParts < 1 )
+		return;
+
+	const float flWide = flTall * flAspect;
+	const int stroke = MAX( 1, (int)( flStroke + 0.5f ) );
+	const int glowRadius = MAX( 1, (int)( flGlowRadius + 0.5f ) );
+	const float flCorner = MAX( 0.0f, flCornerRadius );
+
+	// Texture rect: the icon box plus room for the glow
+	const int margin = glowRadius * 3;
+	const int originX = (int)( flX + 0.5f ) - margin, originY = (int)( flTop + 0.5f ) - margin;
+	const int wide = (int)( flWide + 0.5f ) + 2 * margin;
+	const int tall = (int)( flTall + 0.5f ) + 2 * margin;
+
+	const int key[8] = { originX, originY, wide, tall, nParts, -1, stroke * 1000 + (int)( flCorner * 100.0f ), (int)(intp)pParts };
+	if ( m_nTexture == -1 || V_memcmp( key, m_Key, sizeof( key ) ) )
+	{
+		V_memcpy( m_Key, key, sizeof( key ) );
+		m_iX = originX; m_iY = originY;
+
+		CUtlVector<float> shape, glow, cover, line;
+		shape.SetCount( wide * tall );
+		glow.SetCount( wide * tall );
+		cover.SetCount( wide * tall );
+		line.SetCount( wide * tall );
+		V_memset( shape.Base(), 0, shape.Count() * sizeof( float ) );
+
+		IconSpan_t spansA[ICON_MAX_SPANS], spansB[ICON_MAX_SPANS], spansOut[ICON_MAX_SPANS];
+		Vector2D outer[ICON_MAX_POINTS], inner[ICON_MAX_POINTS];
+		Vector2D outerR[ICON_MAX_ROUNDED], innerR[ICON_MAX_ROUNDED];
+
+		for ( int p = 0; p < nParts; p++ )
+		{
+			const OF2IconPart_t &part = pParts[p];
+			int nOuterR, nInnerR;
+			if ( part.nKind == OF2_ICON_LINE || part.nKind == OF2_ICON_CURVE )
+			{
+				if ( part.nPoints < 2 || part.nPoints > ICON_MAX_POINTS )
+					continue;
+
+				// A straight piece is crisp with its middle on a pixel edge (even stroke) or a pixel's middle (odd)
+				const float flSnap = ( stroke & 1 ) ? 0.5f : 0.0f;
+				for ( int i = 0; i < part.nPoints; i++ )
+				{
+					outer[i].Init( flX + part.pPoints[i].x * flWide, flTop + part.pPoints[i].y * flTall );
+					if ( part.nKind == OF2_ICON_LINE )
+					{
+						outer[i].Init( floorf( outer[i].x - flSnap + 0.5f ) + flSnap, floorf( outer[i].y - flSnap + 0.5f ) + flSnap );
+					}
+				}
+
+				// Coverage from the distance to the line: nothing to hide, so it only adds
+				const float flReach = 0.5f * stroke + 0.5f;
+				for ( int row = 0; row < tall; row++ )
+				{
+					for ( int x = 0; x < wide; x++ )
+					{
+						const Vector2D pixel( originX + x + 0.5f, originY + row + 0.5f );
+						float flDistSqr = FLT_MAX;
+						for ( int i = 0; i + 1 < part.nPoints; i++ )
+						{
+							const Vector2D seg = outer[i + 1] - outer[i];
+							const float flLenSqr = seg.LengthSqr();
+							const float t = ( flLenSqr > 0.0f ) ? clamp( ( pixel - outer[i] ).Dot( seg ) / flLenSqr, 0.0f, 1.0f ) : 0.0f;
+							flDistSqr = MIN( flDistSqr, ( outer[i] + seg * t - pixel ).LengthSqr() );
+						}
+						const float flCover = clamp( flReach - sqrtf( flDistSqr ), 0.0f, 1.0f );
+						shape[row * wide + x] = MAX( shape[row * wide + x], flCover );
+					}
+				}
+				continue;
+			}
+
+			if ( part.nKind == OF2_ICON_RING )
+			{
+				// A ring: whole pixels across, so it is as round on one side as on the other
+				const int d = MAX( 2 * stroke + 1, (int)( part.flDiameter * flTall + 0.5f ) );
+				const float flR = 0.5f * d;
+				const float flCX = (int)( flX + part.flCenterX * flWide - flR + 0.5f ) + flR;
+				const float flCY = (int)( flTop + part.flCenterY * flTall - flR + 0.5f ) + flR;
+				for ( int i = 0; i < ICON_MAX_POINTS; i++ )
+				{
+					const float flAngle = 2.0f * M_PI_F * ( i + 0.5f ) / ICON_MAX_POINTS;
+					const float c = cosf( flAngle ), s = sinf( flAngle );
+					outerR[i].Init( flCX + flR * c, flCY + flR * s );
+					innerR[i].Init( flCX + ( flR - stroke ) * c, flCY + ( flR - stroke ) * s );
+				}
+				nOuterR = nInnerR = ICON_MAX_POINTS;
+			}
+			else
+			{
+				if ( part.nPoints < 3 || part.nPoints > ICON_MAX_POINTS )
+					continue;
+
+				// Snapped to whole pixels so straight edges stay crisp
+				for ( int i = 0; i < part.nPoints; i++ )
+				{
+					outer[i].Init( (int)( flX + part.pPoints[i].x * flWide + 0.5f ), (int)( flTop + part.pPoints[i].y * flTall + 0.5f ) );
+				}
+				IconInsetPolygon( outer, part.nPoints, stroke, inner );
+				nOuterR = IconRoundPolygon( outer, part.nPoints, flCorner, 0.0f, outerR );
+				nInnerR = IconRoundPolygon( inner, part.nPoints, flCorner, stroke, innerR );
+			}
+
+			V_memset( cover.Base(), 0, cover.Count() * sizeof( float ) );
+			V_memset( line.Base(), 0, line.Count() * sizeof( float ) );
+			for ( int row = 0; row < tall; row++ )
+			{
+				for ( int s = 0; s < ICON_SUBSAMPLES; s++ )
+				{
+					const float y = originY + row + ( s + 0.5f ) / ICON_SUBSAMPLES;
+					int nA = IconPolySpans( outerR, nOuterR, y, spansA );
+					int nB = IconPolySpans( innerR, nInnerR, y, spansB );
+					int nOut = IconSubtractSpans( spansA, nA, spansB, nB, spansOut );
+					IconAccumulateSpans( spansA, nA, 1.0f / ICON_SUBSAMPLES, &cover[row * wide], originX, wide );
+					IconAccumulateSpans( spansOut, nOut, 1.0f / ICON_SUBSAMPLES, &line[row * wide], originX, wide );
+				}
+			}
+
+			for ( int i = 0; i < wide * tall; i++ )
+				shape[i] = shape[i] * ( 1.0f - MIN( 1.0f, cover[i] ) ) + MIN( 1.0f, line[i] );
+		}
+
+		for ( int i = 0; i < wide * tall; i++ )
+			glow[i] = MIN( 1.0f, shape[i] );
+
+		for ( int pass = 0; pass < 2; pass++ )
+		{
+			IconBoxBlur( glow.Base(), wide, tall, glowRadius, false );
+			IconBoxBlur( glow.Base(), wide, tall, glowRadius, true );
+		}
+
+		// Scanlines phased so the top row of the box is a bright one
+		SetTextures( shape.Base(), glow.Base(), wide, tall, originY, ( originY + margin ) & 1 );
+	}
+
+	Draw( flGlow, clr );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: OF2: makes the two textures from coverage images of wide x tall
+//-----------------------------------------------------------------------------
+void COF2HudIcon::SetTextures( const float *pShape, const float *pGlow, int wide, int tall, int originY, int brightParity )
+{
+	// White images with coverage as alpha; the color is applied when drawing.
+	// Padded to power-of-two sizes: the engine stores textures that way, and an
+	// odd-sized image would be squashed into part of the texture when drawn.
+	int texWide = 1, texTall = 1;
+	while ( texWide < wide ) texWide <<= 1;
+	while ( texTall < tall ) texTall <<= 1;
+	m_iWide = texWide;
+	m_iTall = texTall;
+
+	CUtlVector<unsigned char> rgbaShape, rgbaGlow;
+	rgbaShape.SetCount( texWide * texTall * 4 );
+	rgbaGlow.SetCount( texWide * texTall * 4 );
+	V_memset( rgbaShape.Base(), 0, rgbaShape.Count() ); // transparent padding
+	V_memset( rgbaGlow.Base(), 0, rgbaGlow.Count() );
+	for ( int row = 0; row < tall; row++ )
+	{
+		const float flRowScale = ( ( ( originY + row ) & 1 ) == brightParity ) ? 1.0f : ICON_SCANLINE_DIM;
+		for ( int x = 0; x < wide; x++ )
+		{
+			const int i = row * wide + x;
+			const int t = row * texWide + x;
+			unsigned char *pShapeOut = &rgbaShape[t * 4], *pGlowOut = &rgbaGlow[t * 4];
+			pShapeOut[0] = pShapeOut[1] = pShapeOut[2] = 255;
+			pShapeOut[3] = (unsigned char)( clamp( pShape[i], 0.0f, 1.0f ) * flRowScale * 255.0f );
+			pGlowOut[0] = pGlowOut[1] = pGlowOut[2] = 255;
+			pGlowOut[3] = (unsigned char)( clamp( pGlow[i] * ICON_GLOW_GAIN, 0.0f, 1.0f ) * flRowScale * 255.0f );
+		}
+	}
+
+	if ( m_nTexture == -1 )
+	{
+		m_nTexture = surface()->CreateNewTextureID( true );
+		m_nGlowTexture = surface()->CreateNewTextureID( true );
+	}
+	surface()->DrawSetTextureRGBA( m_nTexture, rgbaShape.Base(), texWide, texTall, false, true );
+	surface()->DrawSetTextureRGBA( m_nGlowTexture, rgbaGlow.Base(), texWide, texTall, false, true );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: OF2: draws the textures as they are, 1:1
+//-----------------------------------------------------------------------------
+void COF2HudIcon::Draw( float flGlow, Color clr )
+{
+	// Glow first
+	flGlow = clamp( flGlow, 0.0f, 1.0f );
 	if ( flGlow > 0.0f )
 	{
 		Color clrGlow = clr;
 		clrGlow[3] = (unsigned char)( clr[3] * flGlow );
 		surface()->DrawSetColor( clrGlow );
-		surface()->DrawSetTexture( m_nIconGlowTexture );
-		surface()->DrawTexturedRect( m_iIconX, m_iIconY, m_iIconX + m_iIconWide, m_iIconY + m_iIconTall );
+		surface()->DrawSetTexture( m_nGlowTexture );
+		surface()->DrawTexturedRect( m_iX, m_iY, m_iX + m_iWide, m_iY + m_iTall );
 	}
 
 	surface()->DrawSetColor( clr );
-	surface()->DrawSetTexture( m_nIconTexture );
-	surface()->DrawTexturedRect( m_iIconX, m_iIconY, m_iIconX + m_iIconWide, m_iIconY + m_iIconTall );
+	surface()->DrawSetTexture( m_nTexture );
+	surface()->DrawTexturedRect( m_iX, m_iY, m_iX + m_iWide, m_iY + m_iTall );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: OF2: the panel's own icon, in place of its text label
+//-----------------------------------------------------------------------------
+void CHudNumericDisplay::PaintIcon( const Vector2D *pPoints, int nPoints, float flAspect, float flFill, Color clr )
+{
+	// Icon box: from the layout, or matched to the digits (on their baseline, digit height)
+	float flTall = icon_tall;
+	float flTop = icon_ypos;
+	if ( flTall <= 0.0f )
+	{
+		flTall = m_flIconDigitRatio * surface()->GetFontTall( m_hNumberFont );
+		flTop = digit_ypos + surface()->GetFontAscent( m_hNumberFont, L'0' ) - flTall;
+	}
+
+	// The glow pulses with Blur like the digit glow (it rests at 0.6)
+	const float flGlow = m_flIconGlow * m_flBlur / 0.6f;
+
+	m_Icon.Paint( pPoints, nPoints, icon_xpos, flTop, flTall, flAspect, icon_stroke, icon_corner_radius, icon_glow_radius, flGlow, flFill, clr );
 }
 
 

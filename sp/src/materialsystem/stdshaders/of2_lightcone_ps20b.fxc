@@ -1,0 +1,131 @@
+//========= Opposing Force 2 ==================================================//
+//
+// OF2: the light a flashlight makes in the air (of2_lightcone_dx9.cpp).
+//
+// For every pixel: the stretch of the line of sight that lies inside the cone
+// (and on the lit side of the surfaces the light lands on), and the light
+// added up along it. The air is brightest on the cone's axis and has none at
+// its edge, and thins out from the lamp to the end of its reach.
+//
+//=============================================================================//
+
+#include "common_ps_fxc.h"
+
+// The point the cone's sides meet in, a little behind the lamp (which has a
+// width); w: how far behind
+const float4 g_vApex		: register( c0 );
+// Unit vector down the middle; w: reach, from the lamp
+const float4 g_vAxis		: register( c1 );
+// x: cos^2 of the half angle, y: tan^2 of it, z: how fast it thins out along
+// its length, w: how soft its edge is
+const float4 g_vShape		: register( c2 );
+// Colour, times everything that does not change from pixel to pixel
+const float4 g_vColor		: register( c3 );
+// Surfaces the light lands on: xyz normal, w distance. Light only where
+// dot( normal, point ) >= distance.
+const float4 g_vPlanes[4]	: register( c4 );
+const float4 g_vEyePos		: register( c8 );
+
+#define NUM_STEPS	16
+#define FAR_AWAY	100000.0f
+
+struct PS_INPUT
+{
+	float3 worldPos		: TEXCOORD0;
+};
+
+float NotZero( float f )
+{
+	return ( abs( f ) < 0.00001f ) ? ( ( f < 0.0f ) ? -0.00001f : 0.00001f ) : f;
+}
+
+float4 main( PS_INPUT i ) : COLOR
+{
+	float3 vDir = normalize( i.worldPos - g_vEyePos.xyz );
+	float3 vFromApex = g_vEyePos.xyz - g_vApex.xyz;
+
+	// A point on the line of sight, t along it: how far down the axis it is
+	// (flAlong + t * flDirAlong), and its distance from the apex squared
+	// (flDistSqr + 2 * t * flDirDist + t * t)
+	float flDirAlong = NotZero( dot( vDir, g_vAxis.xyz ) );
+	float flAlong = dot( vFromApex, g_vAxis.xyz );
+	float flDirDist = dot( vDir, vFromApex );
+	float flDistSqr = dot( vFromApex, vFromApex );
+
+	float flStart = 0.0f;
+	float flEnd = FAR_AWAY;
+
+	// Between the lamp and the end of its reach
+	float flT1 = ( g_vApex.w - flAlong ) / flDirAlong;
+	float flT2 = ( g_vApex.w + g_vAxis.w - flAlong ) / flDirAlong;
+	flStart = max( flStart, min( flT1, flT2 ) );
+	flEnd = min( flEnd, max( flT1, flT2 ) );
+
+	// Inside the cone: where along^2 >= cos^2 * dist^2
+	float flA = NotZero( flDirAlong * flDirAlong - g_vShape.x );
+	float flB = flDirAlong * flAlong - flDirDist * g_vShape.x;
+	float flC = flAlong * flAlong - flDistSqr * g_vShape.x;
+	float flDisc = flB * flB - flA * flC;
+	float flRoot = sqrt( max( flDisc, 0.0f ) );
+	float flR1 = ( -flB - flRoot ) / flA;
+	float flR2 = ( -flB + flRoot ) / flA;
+	float flLow = min( flR1, flR2 );
+	float flHigh = max( flR1, flR2 );
+
+	if ( flA < 0.0f )
+	{
+		// Looking across it: in at one side and out at the other, or past it
+		flStart = max( flStart, ( flDisc > 0.0f ) ? flLow : FAR_AWAY );
+		flEnd = min( flEnd, flHigh );
+	}
+	else if ( flDirAlong > 0.0f )
+	{
+		// Looking along it, away from the lamp: once in, never out
+		flStart = max( flStart, flHigh );
+	}
+	else
+	{
+		// Looking along it, towards the lamp
+		flEnd = min( flEnd, flLow );
+	}
+
+	// On the lit side of what the light lands on
+	for ( int p = 0; p < 4; p++ )
+	{
+		float flSide = NotZero( dot( g_vPlanes[p].xyz, vDir ) );
+		float flCross = ( g_vPlanes[p].w - dot( g_vPlanes[p].xyz, g_vEyePos.xyz ) ) / flSide;
+		if ( flSide > 0.0f )
+		{
+			flStart = max( flStart, flCross );
+		}
+		else
+		{
+			flEnd = min( flEnd, flCross );
+		}
+	}
+
+	float flLength = max( flEnd - flStart, 0.0f );
+
+	// Add up the light along that stretch
+	float flSum = 0.0f;
+	for ( int s = 0; s < NUM_STEPS; s++ )
+	{
+		float flT = flStart + flLength * ( ( s + 0.5f ) / NUM_STEPS );
+
+		float flZ = max( flAlong + flT * flDirAlong, 0.001f );
+		float flZSqr = flZ * flZ;
+		float flOutSqr = max( flDistSqr + 2.0f * flT * flDirDist + flT * flT - flZSqr, 0.0f );
+
+		// 1 on the axis, 0 at the edge
+		float flIn = saturate( 1.0f - flOutSqr / ( flZSqr * g_vShape.y ) );
+		// 1 at the lamp, 0 at the end of its reach
+		float flNear = saturate( 1.0f - ( flZ - g_vApex.w ) / g_vAxis.w );
+
+		// The same light spread over a wider and wider circle
+		flSum += pow( flIn, g_vShape.w ) * pow( flNear, g_vShape.z ) / flZ;
+	}
+
+	float3 vResult = g_vColor.rgb * ( flSum * flLength / NUM_STEPS );
+
+	return FinalOutput( float4( vResult, 1.0f ), 0.0f, PIXEL_FOG_TYPE_NONE, TONEMAP_SCALE_LINEAR );
+}

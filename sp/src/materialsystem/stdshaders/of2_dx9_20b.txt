@@ -6,3 +6,15 @@
 // Depth of field (Alien Swarm), used by night vision
 depth_of_field_ps20b.fxc
 depth_of_field_vs20.fxc
+
+// The flashlight pass on world brushes, for OF2_LightmappedGeneric (of2_lightmappedgeneric.cpp).
+// Mapbase's versions clip a projected texture behind its origin, which the engine's own do not:
+// without that, a light on an NPC's head shines backwards as well. The base pass of that shader
+// is the engine's own compiled lightmappedgeneric, so nothing else needs compiling here.
+// (Do not add SDK_lightmappedgeneric_ps20b: millions of combinations, hours on this machine.)
+SDK_flashlight_ps2x.fxc
+SDK_lightmappedgeneric_flashlight_vs20.fxc
+
+// The light a flashlight makes in the air (of2_lightcone_dx9.cpp)
+of2_lightcone_ps20b.fxc
+of2_lightcone_vs20.fxc

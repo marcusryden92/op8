@@ -371,7 +371,7 @@ CON_COMMAND( of2_give_manhack, "Gives you manhacks to throw." )
 		return;
 
 	pPlayer->GiveNamedItem( "weapon_manhack" );
-	pPlayer->GiveAmmo( 3, "Manhack" );
+	pPlayer->GiveAmmo( 7, "Manhack" );
 
 	CBaseCombatWeapon *pWeapon = pPlayer->Weapon_OwnsThisType( "weapon_manhack" );
 

@@ -1,0 +1,31 @@
+//========= Opposing Force 2 ==================================================//
+//
+// OF2: the light a flashlight makes in the air (of2_lightcone_dx9.cpp).
+// The mesh is only the outside of the cone; all this hands on is where in the
+// world each of its points is.
+//
+//=============================================================================//
+
+#include "common_vs_fxc.h"
+
+struct VS_INPUT
+{
+	float4 vPos			: POSITION;
+};
+
+struct VS_OUTPUT
+{
+	float4 projPos		: POSITION;
+	float3 worldPos		: TEXCOORD0;
+};
+
+VS_OUTPUT main( const VS_INPUT v )
+{
+	VS_OUTPUT o;
+
+	float3 worldPos = mul( float4( v.vPos.xyz, 1.0f ), cModel[0] );
+	o.projPos = mul( float4( worldPos, 1.0f ), cViewProj );
+	o.worldPos = worldPos;
+
+	return o;
+}

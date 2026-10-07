@@ -8,6 +8,7 @@
 #include "in_buttons.h"
 #include "utlrbtree.h"
 #include "hl2_shareddefs.h"
+#include "movevars_shared.h"
 
 #ifdef HL2MP
 #include "hl2mp_gamerules.h"
@@ -1517,7 +1518,28 @@ void CHL2GameMovement::FullWalkMove()
 	{
 		// Climbing up takes the player off the ground; otherwise a tether at
 		// its full length only holds them back
-		if ( TetherConstrain( flClimb <= 0.0f ) )
+		bool bStayOnGround = ( flClimb <= 0.0f );
+
+		// So does a tether that is being taken in (a Barnacle reeling), where it
+		// goes up steeply enough. It pulls along its own line, as on any loose
+		// thing: the player gets the speed it comes in at, towards where it
+		// goes, and leaves the ground if the upward part of that would lift
+		// them over a step. (They were slid along the ground until right under
+		// it before, and only then lifted.) Walking against it doesn't: that
+		// pulls far slower than a reel.
+		float flPull = ( gpGlobals->frametime > 0.0f ) ? MIN( ( flDist - flLength ) / gpGlobals->frametime, 1000.0f ) : 0.0f;
+		if ( bStayOnGround && flPull * vecUpTether.z > sqrt( 2.0f * GetCurrentGravity() * player->m_Local.m_flStepSize ) )
+		{
+			bStayOnGround = false;
+
+			float flToward = DotProduct( mv->m_vecVelocity, vecUpTether );
+			if ( flToward < flPull )
+			{
+				mv->m_vecVelocity += vecUpTether * ( flPull - flToward );
+			}
+		}
+
+		if ( TetherConstrain( bStayOnGround ) )
 		{
 			SetGroundEntity( NULL );
 		}

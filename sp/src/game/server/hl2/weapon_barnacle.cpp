@@ -132,12 +132,12 @@
 #define BARNACLE_TIP_SNAG_DIST		1.5f
 #define BARNACLE_TIP_SNAG_TIME		2.0f
 
-ConVar of2_barnacle_max_length( "of2_barnacle_max_length", "900", FCVAR_NONE, "Length of the Barnacle's whole tongue. Read when thrown." );
-ConVar of2_barnacle_throw_speed( "of2_barnacle_throw_speed", "2000", FCVAR_NONE, "Speed the Barnacle's tip is thrown at." );
+ConVar of2_barnacle_max_length( "of2_barnacle_max_length", "1500", FCVAR_NONE, "Length of the Barnacle's whole tongue. Read when thrown." );
+ConVar of2_barnacle_throw_speed( "of2_barnacle_throw_speed", "700", FCVAR_NONE, "Speed the Barnacle's tip is thrown at." );
 ConVar of2_barnacle_throw_up( "of2_barnacle_throw_up", "120", FCVAR_NONE, "Upward speed added to the Barnacle's throw." );
 ConVar of2_barnacle_throw_slack( "of2_barnacle_throw_slack", "0.01", FCVAR_NONE, "How much more tongue than the tip needs comes out behind it during the throw, as a share. 0 is a dead straight line." );
 ConVar of2_barnacle_tip_weight( "of2_barnacle_tip_weight", "150", FCVAR_NONE, "The Barnacle's tip weighs this many times one point of its tongue. Heavier, the tongue trailing behind slows the throw less." );
-ConVar of2_barnacle_rope_drag( "of2_barnacle_rope_drag", "0.5", FCVAR_NONE, "Air drag on the Barnacle's tongue (not its tip), so it hangs back in an arc and settles instead of whipping about." );
+ConVar of2_barnacle_rope_drag( "of2_barnacle_rope_drag", "4", FCVAR_NONE, "Air drag on the Barnacle's tongue (not its tip), so it hangs back in an arc and settles instead of whipping about." );
 ConVar of2_barnacle_anchor_mass( "of2_barnacle_anchor_mass", "85", FCVAR_NONE, "Something heavier than this on the Barnacle's tip holds the player instead of being pulled: they hang from it as from a rope. The player weighs about 85." );
 ConVar of2_barnacle_reel_speed( "of2_barnacle_reel_speed", "400", FCVAR_NONE, "Speed the Barnacle reels its tongue in (primary fire, held), pulling the player up when it is anchored." );
 ConVar of2_barnacle_extrude_speed( "of2_barnacle_extrude_speed", "200", FCVAR_NONE, "Speed the Barnacle pays its tongue out (secondary fire, held), lowering the player when it is anchored." );
@@ -157,7 +157,6 @@ ConVar of2_barnacle_snag_dist( "of2_barnacle_snag_dist", "32", FCVAR_NONE, "Some
 ConVar of2_barnacle_snag_time( "of2_barnacle_snag_time", "0.5", FCVAR_NONE, "Something that has been slipping off the Barnacle's tongue for this long is let go." );
 ConVar of2_barnacle_sag( "of2_barnacle_sag", "0.1", FCVAR_NONE, "How much the weight of what the Barnacle's tongue carries pulls the tongue down there (per unit of mass)." );
 ConVar of2_barnacle_spacing( "of2_barnacle_spacing", "20", FCVAR_NONE, "The loose part of the Barnacle's tongue is simulated as a point about every this much of its length (up to 48 points), so it is as stiff and hangs the same way whether it is short or long. Smaller is suppler." );
-ConVar of2_barnacle_settle_speed( "of2_barnacle_settle_speed", "300", FCVAR_NONE, "The Barnacle's tongue is thrown out along the arc its tip flies, which is longer than the straight line to where the tip ends up. Once the throw is over that slack is taken up at this speed." );
 ConVar of2_barnacle_drape( "of2_barnacle_drape", "1", FCVAR_NONE, "The length of the Barnacle's tongue lies on and drapes over loose physics objects, as it does over the world. 0: only over the world." );
 ConVar of2_barnacle_slide_speed( "of2_barnacle_slide_speed", "120", FCVAR_NONE, "Where the Barnacle's tongue goes over an edge it slides along the edge, towards where it pulls on it evenly. This is its speed at the hardest pull. 0: it stays where it first touched." );
 ConVar of2_barnacle_slide_friction( "of2_barnacle_slide_friction", "0.35", FCVAR_NONE, "How sticky the Barnacle's tongue is on an edge: how lopsided the pull has to be before it slides along it (0 always, 1 only when dragged almost straight along it). A climb rope has its own, lower." );
@@ -374,8 +373,7 @@ private:
 };
 
 //-----------------------------------------------------------------------------
-// The loose part of the tongue: a row of points from where it starts (the
-// barnacle, or the last edge the tongue bends over) to the tip. Source's rope
+// The tongue: a row of points from the barnacle to the tip. Source's rope
 // solver moves the points; the rules for them are here.
 //
 // The first point is held at the start. The tip is either held too (stuck to
@@ -389,9 +387,9 @@ public:
 	// All of it at one point, the tip leaving at vecTipVelocity
 	void	Seed( const Vector &vecStart, const Vector &vecTipVelocity );
 
-	// The start has jumped to a new bend (bNewBend), or back to the one before:
-	// the points are laid out again along the way the tongue lies now
-	void	Rebase( const Vector &vecStart, bool bNewBend );
+	// The tip has stopped at vecTip. Every point loses the speed it has that
+	// way over the ground and keeps the rest: sideways, and up or down
+	void	StopRunning( const Vector &vecTip );
 
 	// One tick. flLength is how much tongue there is from the start to the tip.
 	// pTipPin is where the tip is held, or NULL if it is free.
@@ -433,11 +431,17 @@ public:
 	// How readily each point gives way to its neighbours: 1 for a bare point of
 	// tongue, less for one with something heavy on it. Set before every Step.
 	float	m_flInvMass[OF2_TONGUE_NODES];
+	// The edges the straight way from the start to a held tip goes over, in
+	// that order (the tether's bends). The points are not tied to them: pulled
+	// tight the tongue cannot be shorter than the way over them, and that is all.
+	Vector	m_vecVia[OF2_TETHER_MAX_PIVOTS];
+	int		m_nVia;
 
 private:
-	// Lays nCount points evenly along the way the tongue lies now, moving as it
-	// does. pStart: it starts from there instead (see Rebase).
-	void	Relay( const Vector *pStart, bool bNewBend, int nCount );
+	// Lays nCount points evenly along the way the tongue lies now, moving as it does
+	void	Relay( int nCount );
+	// The shortest way from the start to the held tip: straight, or over m_vecVia
+	int		GetLine( Vector *pLine ) const;
 
 	int		m_nCount;
 	Vector	m_vecStart;
@@ -457,6 +461,7 @@ CBarnacleRope::CBarnacleRope()
 	m_nDrapeIgnore = 0;
 	m_bFeeding = false;
 	m_vecFeedVelocity.Init();
+	m_nVia = 0;
 	m_nCount = 2;
 	m_vecStart.Init();
 	m_vecTipPin.Init();
@@ -497,64 +502,50 @@ float CBarnacleRope::GetLength( void ) const
 	return flLength;
 }
 
-void CBarnacleRope::Rebase( const Vector &vecStart, bool bNewBend )
+void CBarnacleRope::StopRunning( const Vector &vecTip )
 {
-	Relay( &vecStart, bNewBend, m_nCount );
-	m_vecStart = vecStart;
+	// The way the throw went, on the level. (Thrown straight up or down there
+	// is no such way, and it is the line itself.)
+	Vector vecAhead = vecTip - m_Nodes[0].m_vPos;
+	Vector vecLevel( vecAhead.x, vecAhead.y, 0.0f );
+	if ( vecLevel.Length() > 0.1f * vecAhead.Length() )
+	{
+		vecAhead = vecLevel;
+	}
+
+	if ( VectorNormalize( vecAhead ) < 0.001f )
+		return;
+
+	for ( int i = 1; i < m_nCount - 1; i++ )
+	{
+		Vector vecMove = m_Nodes[i].m_vPos - m_Nodes[i].m_vPrevPos;
+		vecMove -= vecAhead * DotProduct( vecMove, vecAhead );
+		m_Nodes[i].m_vPrevPos = m_Nodes[i].m_vPos - vecMove;
+	}
 }
 
-void CBarnacleRope::Relay( const Vector *pStart, bool bNewBend, int nCount )
+int CBarnacleRope::GetLine( Vector *pLine ) const
 {
-	Vector vecPos[OF2_TONGUE_NODES + 1];
-	Vector vecMove[OF2_TONGUE_NODES + 1];
-	int nSource = 0;
-	int iFirst = 0;
-
-	if ( pStart )
+	int nLine = 0;
+	pLine[nLine++] = m_vecStart;
+	for ( int i = 0; i < m_nVia && i < OF2_TETHER_MAX_PIVOTS; i++ )
 	{
-		vecPos[nSource] = *pStart;
-		vecMove[nSource] = vec3_origin;
-		nSource++;
+		pLine[nLine++] = m_vecVia[i];
 	}
+	pLine[nLine++] = m_vecTipPin;
+	return nLine;
+}
 
-	if ( pStart && bNewBend )
+void CBarnacleRope::Relay( int nCount )
+{
+	Vector vecPos[OF2_TONGUE_NODES];
+	Vector vecMove[OF2_TONGUE_NODES];
+	int nSource = m_nCount;
+
+	for ( int i = 0; i < m_nCount; i++ )
 	{
-		// Where the run of points comes nearest the new start
-		float flBest = FLT_MAX;
-		int iBest = 0;
-		for ( int i = 0; i < m_nCount - 1; i++ )
-		{
-			float flDist = CalcDistanceToLineSegment( *pStart, m_Nodes[i].m_vPos, m_Nodes[i + 1].m_vPos );
-			if ( flDist < flBest )
-			{
-				flBest = flDist;
-				iBest = i;
-			}
-		}
-
-		// The tongue has come to lie over an edge. What is before that place on
-		// it is no longer loose, however far off the edge the points are (thrown
-		// in an arc, they can be well above it): kept, the tongue would run from
-		// the bend back to where it used to start and out again. The old start
-		// goes in any case. (A bend that went is the other way round: the start
-		// is further back, and the tongue runs straight from there to where it
-		// used to start, so every point stays.)
-		iFirst = iBest + 1;
-	}
-
-	for ( int i = iFirst; i < m_nCount; i++ )
-	{
-		vecPos[nSource] = m_Nodes[i].m_vPos;
-		vecMove[nSource] = m_Nodes[i].m_vPos - m_Nodes[i].m_vPrevPos;
-		nSource++;
-	}
-
-	if ( nSource < 2 )
-	{
-		// (the new start is past everything but the tip)
-		vecPos[1] = vecPos[0];
-		vecMove[1] = vecMove[0];
-		nSource = 2;
+		vecPos[i] = m_Nodes[i].m_vPos;
+		vecMove[i] = m_Nodes[i].m_vPos - m_Nodes[i].m_vPrevPos;
 	}
 
 	if ( m_bFeeding )
@@ -615,7 +606,15 @@ void CBarnacleRope::Step( const Vector &vecStart, float flLength, const Vector *
 
 		// Something on the tip can lag behind the tongue's length for a moment.
 		// The points are spread over the gap rather than fought over by both ends.
-		flLength = MAX( flLength, vecStart.DistTo( m_vecTipPin ) );
+		Vector vecLine[OF2_TETHER_MAX_PIVOTS + 2];
+		int nLine = GetLine( vecLine );
+		float flLine = 0.0f;
+		for ( int j = 1; j < nLine; j++ )
+		{
+			flLine += vecLine[j].DistTo( vecLine[j - 1] );
+		}
+
+		flLength = MAX( flLength, flLine );
 	}
 
 	flLength = MAX( flLength, 1.0f );
@@ -627,7 +626,15 @@ void CBarnacleRope::Step( const Vector &vecStart, float flLength, const Vector *
 	int nWanted = clamp( (int)( flLinks + 0.5f ) + 1, 2, OF2_TONGUE_NODES );
 	if ( nWanted != m_nCount && fabs( flLinks - ( m_nCount - 1 ) ) > 0.75f )
 	{
-		Relay( NULL, false, nWanted );
+		Relay( nWanted );
+	}
+	else if ( m_bFeeding && m_Nodes[1].m_vPos.DistTo( m_Nodes[0].m_vPos ) > 1.75f * flLength / ( m_nCount - 1 ) )
+	{
+		// A long throw runs out of points to add, and what is fed out after
+		// that would all be one stretch from the start to the first point,
+		// growing. When the throw ended that stretch was pulled in to the
+		// length of any other in a single tick.
+		Relay( m_nCount );
 	}
 
 	m_flSegment = flLength / ( m_nCount - 1 );
@@ -715,8 +722,137 @@ void CBarnacleRope::ApplyConstraints( CSimplePhysics::CNode *pNodes, int nNodes 
 		}
 	}
 
+	// Where the tongue lies against one of the edges the straight way to its
+	// tip goes over, it runs over that edge as over a pulley: what is past the
+	// edge can be no further from it than the tongue left over once it has got
+	// there from the start, and likewise back from a held tip. So taking the
+	// tongue in draws the far part up to the edge and over it, rather than
+	// straight at the barnacle through whatever the edge belongs to. Nothing is
+	// moved to the edge and no point is tied to it; and only where the tongue
+	// has come down on it, since one still in the air above is not held by it.
+	// (The user asked for this in place of starting the tongue again from the
+	// edge the moment the straight way first crossed it.)
+	float flReach = MAX( of2_barnacle_spacing.GetFloat(), 4.0f );
+	float flBefore = 0.0f;
+	for ( int k = 0; k < m_nVia && k < OF2_TETHER_MAX_PIVOTS && !m_bFeeding; k++ )
+	{
+		// (how much tongue it takes to get here from the start, at the least)
+		flBefore += m_vecVia[k].DistTo( ( k == 0 ) ? m_vecStart : m_vecVia[k - 1] );
+
+		// Where along the tongue it comes nearest this edge, and how near
+		float flNearest = FLT_MAX;
+		float flAt = 0.0f;
+		for ( int i = 0; i < iTip; i++ )
+		{
+			float t = 0.0f;
+			float flDist = CalcDistanceToLineSegment( m_vecVia[k], pNodes[i].m_vPos, pNodes[i + 1].m_vPos, &t );
+			if ( flDist < flNearest )
+			{
+				flNearest = flDist;
+				flAt = i + clamp( t, 0.0f, 1.0f );
+			}
+		}
+
+		// All of it from within half a point's spacing; less from further off,
+		// so the tongue isn't tugged as it comes down on the edge
+		float flHold = clamp( 2.0f - 2.0f * flNearest / flReach, 0.0f, 1.0f );
+		if ( flHold <= 0.0f )
+			continue;
+
+		for ( int i = (int)flAt + 1; i <= iTip; i++ )
+		{
+			if ( i == iTip && m_bTipPinned )
+				break;
+
+			Vector vecOut = pNodes[i].m_vPos - m_vecVia[k];
+			float flOut = vecOut.Length();
+			float flMost = MAX( m_flSegment * i - flBefore, 0.0f ) + flNearest;
+			if ( flOut > flMost && flOut > 0.001f )
+			{
+				pNodes[i].m_vPos = m_vecVia[k] + vecOut * ( 1.0f + ( flMost / flOut - 1.0f ) * flHold );
+			}
+		}
+
+		if ( !m_bTipPinned )
+			continue;
+
+		float flAfter = 0.0f;
+		for ( int j = k; j < m_nVia; j++ )
+		{
+			flAfter += m_vecVia[j].DistTo( ( j + 1 < m_nVia ) ? m_vecVia[j + 1] : m_vecTipPin );
+		}
+
+		for ( int i = 1; i <= (int)flAt; i++ )
+		{
+			Vector vecOut = pNodes[i].m_vPos - m_vecVia[k];
+			float flOut = vecOut.Length();
+			float flMost = MAX( m_flSegment * ( iTip - i ) - flAfter, 0.0f ) + flNearest;
+			if ( flOut > flMost && flOut > 0.001f )
+			{
+				pNodes[i].m_vPos = m_vecVia[k] + vecOut * ( 1.0f + ( flMost / flOut - 1.0f ) * flHold );
+			}
+		}
+	}
+
 	if ( m_bTipPinned )
 	{
+		// Held at both ends, a point can be no further off the shortest way
+		// between them (straight, or over the edges it bends round) than where
+		// its two reaches meet. The two checks either side of this one move a
+		// point towards an end, which is along that way and hardly towards it:
+		// on their own they let a tongue with a unit of slack sag three times
+		// as far as it could, and bounce there.
+		Vector vecLine[OF2_TETHER_MAX_PIVOTS + 2];
+		int nLine = GetLine( vecLine );
+		float flLine = 0.0f;
+		for ( int j = 1; j < nLine; j++ )
+		{
+			flLine += vecLine[j].DistTo( vecLine[j - 1] );
+		}
+
+		for ( int i = 1; i < iTip && flLine > 0.001f; i++ )
+		{
+			float flNear = m_flSegment * i;
+			float flFar = m_flSegment * ( iTip - i );
+			float flAlong = ( flLine * flLine + flNear * flNear - flFar * flFar ) / ( 2.0f * flLine );
+			float flMost = sqrt( MAX( flNear * flNear - flAlong * flAlong, 0.0f ) );
+
+			// The two reaches only meet like that when neither end is nearer the
+			// point than the place they meet at. With far more tongue than the
+			// way is long (a high lob that lands close by), one reach lies
+			// inside the other, and the point can be anywhere the shorter one
+			// lets it. (Without this the limit came out as nothing, and the
+			// whole arc was put on the line within three ticks of the tip
+			// landing: the snap the user kept seeing on slow, high throws.)
+			if ( flAlong < 0.0f )
+			{
+				flMost = flNear;
+			}
+			else if ( flAlong > flLine )
+			{
+				flMost = flFar;
+			}
+
+			Vector vecOn = vecLine[0];
+			float flOff = FLT_MAX;
+			for ( int j = 1; j < nLine; j++ )
+			{
+				Vector vecClosest;
+				CalcClosestPointOnLineSegment( pNodes[i].m_vPos, vecLine[j - 1], vecLine[j], vecClosest );
+				float flDist = vecClosest.DistTo( pNodes[i].m_vPos );
+				if ( flDist < flOff )
+				{
+					flOff = flDist;
+					vecOn = vecClosest;
+				}
+			}
+
+			if ( flOff > flMost && flOff > 0.001f )
+			{
+				pNodes[i].m_vPos = vecOn + ( pNodes[i].m_vPos - vecOn ) * ( flMost / flOff );
+			}
+		}
+
 		for ( int i = 1; i < iTip; i++ )
 		{
 			Vector vecOut = pNodes[i].m_vPos - m_vecTipPin;
@@ -958,10 +1094,10 @@ private:
 	// The velocity the tip was thrown at; the rest of the tongue is fed out at the same
 	Vector		m_vecLaunchVelocity;
 	bool		m_bWasFeeding;
-	// What the throw left the tongue longer than it needs to be; taken up as it settles
+	// What the throw left the tongue longer than it needs to be: it hangs by that until it is reeled
 	float		m_flSlack;
-	// The tether's bends at the last tick; a change moves where the loose part starts
-	int			m_nLastPivots;
+	// When the throw ended
+	float		m_flSlackTime;
 
 	int			m_iTip;
 	// What the tip is on, if it is not the world, and where on it (m_TipHold.vecLocal)
@@ -1067,7 +1203,7 @@ CWeaponBarnacle::CWeaponBarnacle()
 	m_vecLaunchVelocity.Init();
 	m_bWasFeeding = false;
 	m_flSlack = 0.0f;
-	m_nLastPivots = 0;
+	m_flSlackTime = 0.0f;
 	m_iTip = TIP_FREE;
 	m_bTipOnEntity = false;
 	m_vecTipFixed.Init();
@@ -1297,7 +1433,6 @@ void CWeaponBarnacle::Throw( void )
 
 	m_Tether.Init( vecMouth, vecMouth, 1.0f );
 	m_Tether.SetPlayerEnd( TETHER_START );
-	m_nLastPivots = 0;
 
 	m_iTip = TIP_FREE;
 	m_bTipOnEntity = false;
@@ -2012,6 +2147,12 @@ void CWeaponBarnacle::UpdateAnchored( CHL2_Player *pPlayer, const Vector &vecTip
 		// (CHL2GameMovement::TetherMantleMove): the tongue gives what that takes
 		m_flLeash = MAX( m_flLeash, flFixed + m_Tether.GetSwingPoint().DistTo( vecHand ) + BARNACLE_MANTLE_SLACK );
 	}
+	else if ( m_bReeling && m_flSlack > 0.0f )
+	{
+		// More tongue is out than the way to the tip is long (the arc of the
+		// throw). Reeling takes that in first, and the tongue straightens; it
+		// only pulls once it is as short as that way (TongueThink).
+	}
 	else if ( m_bReeling )
 	{
 		// Standing over the point the tongue runs to (up on the ledge it goes
@@ -2110,6 +2251,10 @@ bool CWeaponBarnacle::UpdateLoose( CBasePlayer *pOwner, const Vector &vecMouth, 
 			m_bPayingOut = false;
 		}
 	}
+	else if ( m_bReeling && m_flSlack > 0.0f )
+	{
+		// (the slack the throw left comes in first, as in UpdateAnchored)
+	}
 	else if ( m_bReeling )
 	{
 		// Slack is taken up first, and faster
@@ -2171,26 +2316,16 @@ bool CWeaponBarnacle::UpdateLoose( CBasePlayer *pOwner, const Vector &vecMouth, 
 }
 
 //-----------------------------------------------------------------------------
-// The tongue's whole path from the tip in: its loose points, its bends, and
-// the barnacle
+// The tongue's whole path from the tip in, as it lies
 //-----------------------------------------------------------------------------
 int CWeaponBarnacle::GetPath( Vector *pPath ) const
 {
 	int nPath = 0;
-	int nPivots = m_Tether.GetPivotCount();
-
-	// (with bends, the first loose point is the last bend)
-	for ( int i = m_Rope.GetCount() - 1; i >= ( ( nPivots > 0 ) ? 1 : 0 ); i-- )
+	for ( int i = m_Rope.GetCount() - 1; i >= 0; i-- )
 	{
 		pPath[nPath++] = m_Rope.GetPos( i );
 	}
 
-	for ( int j = nPivots - 1; j >= 0; j-- )
-	{
-		pPath[nPath++] = m_Tether.GetPoint( j + 1 );
-	}
-
-	pPath[nPath++] = m_Tether.GetPoint( 0 );
 	return nPath;
 }
 
@@ -2581,7 +2716,8 @@ void CWeaponBarnacle::UpdateTongue( void )
 	}
 	pTongue->m_nNodes = nNodes;
 
-	// From where the loose part starts, back towards the barnacle
+	// The edges the straight way to the tip goes over, from the tip's end back.
+	// The client draws the tongue round the ones it lies against.
 	int nBends = 0;
 	for ( int j = m_Tether.GetPivotCount() - 1; j >= 0 && nBends < OF2_TONGUE_MAX_BENDS; j-- )
 	{
@@ -2646,18 +2782,22 @@ void CWeaponBarnacle::TongueThink( void )
 	Vector vecMouth = GetMouthPos( pPlayer );
 	Vector vecNear = ( m_iTip == TIP_ANCHORED ) ? COF2Tether::GetPlayerHandPos( pPlayer, true ) : vecMouth;
 
-	// The loose part: from the last bend, or the near end if there is none, to the tip
+	// All of the tongue is simulated, from the barnacle to the tip, whatever
+	// edges the straight way between the two goes over (the tether's bends).
+	// (It used to be only the part past the last bend, started again from there
+	// whenever a bend came or went, with a straight line drawn for the rest:
+	// a tongue thrown over an edge jumped to it. The user rejected that.)
 	Vector vecPin;
 	bool bPinned = GetTipPin( &vecPin );
-	Vector vecStart = ( m_Tether.GetPivotCount() > 0 ) ? m_Tether.GetNearestPoint( TETHER_END ) : vecNear;
+	Vector vecStart = vecNear;
 
-	// The throw, with nothing in the tongue's way yet: it is fed out of the
-	// barnacle rather than pulled out by the tip. Every bit of it leaves at the
-	// velocity the tip was thrown at and flies free, so the whole tongue lies
-	// along the arc the tip took. Its length is whatever has come out.
-	bool bFeeding = m_bPayingOut && !bPinned && m_Tether.GetPivotCount() == 0;
+	// The throw: the tongue is fed out of the barnacle rather than pulled out
+	// by the tip. Every bit of it leaves at the velocity the tip was thrown at
+	// and flies free, so the whole tongue lies along the arc the tip took. Its
+	// length is whatever has come out.
+	bool bFeeding = m_bPayingOut && !bPinned;
 
-	float flLength = m_Tether.GetFarEndAllowance();
+	float flLength = m_Tether.GetTotalLength();
 	if ( bFeeding )
 	{
 		flLength = m_Rope.GetLength() + m_Rope.GetTipVelocity().Length() * TICK_INTERVAL;
@@ -2673,31 +2813,43 @@ void CWeaponBarnacle::TongueThink( void )
 
 	if ( !bFeeding )
 	{
-		// The throw is over. The arc is longer than the straight line the
-		// tongue is now measured by; rather than snap to that, it keeps the
-		// difference as slack and gives it up as it settles.
+		// The throw is over. What came out lies along the arc the tip flew,
+		// which is longer than the straight line the tongue is otherwise
+		// measured by. That much more of it is out, and stays out: the tongue
+		// falls and hangs by its own weight. Reeling takes it up first.
 		if ( m_bWasFeeding )
 		{
 			m_flSlack = MAX( m_Rope.GetLength() - flLength, 0.0f );
+			m_flSlackTime = gpGlobals->curtime;
+
+			// The tip has stuck. Every point behind it is still flying at the
+			// speed of the throw, which nothing took off it while it was fed
+			// out. What carries them on towards the tip goes with it. The rest
+			// stays: sideways (thrown while strafing, the tongue is moving with the
+			// player) and up or down, so each part of the arc goes on rising or
+			// falling as it was and the tongue settles by its own weight. (Stopped
+			// dead, it lost its swing and dropped from a standstill; with only the
+			// speed along the tongue taken off, a straight throw still did, since
+			// there all of the speed is along the tongue. The user rejected both.)
+			if ( bPinned )
+			{
+				m_Rope.StopRunning( vecPin );
+			}
+		}
+
+		if ( m_bReeling || m_bRetracting )
+		{
+			// (slack comes in faster than tongue that pulls, as it does in UpdateLoose)
+			float flSpeed = of2_barnacle_reel_speed.GetFloat() * ( m_bRetracting ? 1.0f : BARNACLE_SLACK_REEL );
+			m_flSlack = MAX( m_flSlack - flSpeed * TICK_INTERVAL, 0.0f );
 		}
 
 		flLength += m_flSlack;
-		m_flSlack = MAX( m_flSlack - of2_barnacle_settle_speed.GetFloat() * TICK_INTERVAL, 0.0f );
 	}
 
 	m_bWasFeeding = bFeeding;
 	m_Rope.m_bFeeding = bFeeding;
 	m_Rope.m_vecFeedVelocity = m_vecLaunchVelocity;
-
-	if ( m_bPayingOut && !bPinned && !bFeeding )
-	{
-		// The tongue comes out as fast as the tip takes it, so the throw isn't
-		// held back by a length measured a tick ago
-		float flReach = vecStart.DistTo( m_Rope.GetTip() ) + m_Rope.GetTipVelocity().Length() * TICK_INTERVAL;
-		flReach *= 1.0f + MAX( of2_barnacle_throw_slack.GetFloat(), 0.0f );
-		float flMost = MAX( m_flMaxLength - m_Tether.GetFixedLength( TETHER_END ), flLength );
-		flLength = clamp( flReach, flLength, flMost );
-	}
 
 	WeighTongue();
 	m_Rope.m_pIgnore = pPlayer;
@@ -2717,7 +2869,35 @@ void CWeaponBarnacle::TongueThink( void )
 	}
 	m_Rope.m_bSticky = !bPinned && !m_bRetracting && m_hCarried == NULL && gpGlobals->curtime >= m_flTipStickTime;
 	m_Rope.m_bCollide = !m_bRetracting;
+
+	m_Rope.m_nVia = m_Tether.GetPivotCount();
+	for ( int i = 0; i < m_Rope.m_nVia; i++ )
+	{
+		m_Rope.m_vecVia[i] = m_Tether.GetPoint( i + 1 );
+	}
+
 	m_Rope.Step( vecStart, flLength, bPinned ? &vecPin : NULL );
+
+	if ( of2_barnacle_debug.GetBool() && bPinned && gpGlobals->curtime < m_flSlackTime + 1.5f )
+	{
+		// The first moments after the tip sticks: how far the tongue stands off
+		// the straight line (most of any point; above it is positive)
+		Vector vecLine = vecPin - vecStart;
+		float flLine = VectorNormalize( vecLine );
+		float flOff = 0.0f;
+		for ( int i = 1; i < m_Rope.GetCount() - 1; i++ )
+		{
+			Vector vecOut = m_Rope.GetPos( i ) - vecStart;
+			vecOut -= vecLine * DotProduct( vecOut, vecLine );
+			if ( vecOut.Length() > fabs( flOff ) )
+			{
+				flOff = ( vecOut.z < 0.0f ) ? -vecOut.Length() : vecOut.Length();
+			}
+		}
+
+		Msg( "tongue +%.3f: line %.1f, lies %.1f, allowed %.1f (slack %.2f), off the line %.1f, %d points\n",
+			gpGlobals->curtime - m_flSlackTime, flLine, m_Rope.GetLength(), flLength, m_flSlack, flOff, m_Rope.GetCount() );
+	}
 
 	bool bJustAnchored = false;
 	trace_t tr;
@@ -2747,13 +2927,6 @@ void CWeaponBarnacle::TongueThink( void )
 	if ( m_iTip == TIP_PREY )
 	{
 		UpdatePrey( pPlayer );
-	}
-
-	// A bend that came or went moved where the loose part starts
-	if ( m_Tether.GetPivotCount() != m_nLastPivots )
-	{
-		m_Rope.Rebase( m_Tether.GetNearestPoint( TETHER_END ), m_Tether.GetPivotCount() > m_nLastPivots );
-		m_nLastPivots = m_Tether.GetPivotCount();
 	}
 
 	UpdateHolds( pPlayer );
