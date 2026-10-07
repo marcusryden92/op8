@@ -37,7 +37,7 @@
 ConVar sk_plr_dmg_k98( "sk_plr_dmg_k98", "100" );
 
 // Not archived; they reset on restart.
-ConVar of2_k98_noise( "of2_k98_noise", "6000", FCVAR_NONE, "How far NPCs hear a K98 shot, in units, before of2_gunfire_carry (other guns: 1500). With the default carry that is 15000, most of a map." );
+ConVar of2_k98_noise( "of2_k98_noise", "6000", FCVAR_NONE, "How far NPCs hear a K98 shot, in units, before of2_gunfire_carry (other guns: 1500). With the default carry that is 30000, any map." );
 ConVar of2_k98_firerate("of2_k98_firerate", "1.5", FCVAR_NONE, "Seconds between K98 shots: the time it takes to work the bolt." );
 ConVar of2_k98_zoom_fov( "of2_k98_zoom_fov", "20", FCVAR_NONE, "Field of view through the K98's scope, in degrees." );
 ConVar of2_k98_bolt_unzoom( "of2_k98_bolt_unzoom", "1", FCVAR_NONE, "1: a K98 shot takes the view out of the scope until the bolt has been worked. 0: it stays in." );

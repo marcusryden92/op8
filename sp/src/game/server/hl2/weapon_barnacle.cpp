@@ -133,7 +133,7 @@
 #define BARNACLE_TIP_SNAG_TIME		2.0f
 
 ConVar of2_barnacle_max_length( "of2_barnacle_max_length", "1500", FCVAR_NONE, "Length of the Barnacle's whole tongue. Read when thrown." );
-ConVar of2_barnacle_throw_speed( "of2_barnacle_throw_speed", "700", FCVAR_NONE, "Speed the Barnacle's tip is thrown at." );
+ConVar of2_barnacle_throw_speed( "of2_barnacle_throw_speed", "1100", FCVAR_NONE, "Speed the Barnacle's tip is thrown at." );
 ConVar of2_barnacle_throw_up( "of2_barnacle_throw_up", "120", FCVAR_NONE, "Upward speed added to the Barnacle's throw." );
 ConVar of2_barnacle_throw_slack( "of2_barnacle_throw_slack", "0.01", FCVAR_NONE, "How much more tongue than the tip needs comes out behind it during the throw, as a share. 0 is a dead straight line." );
 ConVar of2_barnacle_tip_weight( "of2_barnacle_tip_weight", "150", FCVAR_NONE, "The Barnacle's tip weighs this many times one point of its tongue. Heavier, the tongue trailing behind slows the throw less." );
@@ -156,7 +156,7 @@ ConVar of2_barnacle_collect_count( "of2_barnacle_collect_count", "8", FCVAR_NONE
 ConVar of2_barnacle_snag_dist( "of2_barnacle_snag_dist", "32", FCVAR_NONE, "Something the Barnacle's tongue holds that falls this far behind its place on the tongue is slipping." );
 ConVar of2_barnacle_snag_time( "of2_barnacle_snag_time", "0.5", FCVAR_NONE, "Something that has been slipping off the Barnacle's tongue for this long is let go." );
 ConVar of2_barnacle_sag( "of2_barnacle_sag", "0.1", FCVAR_NONE, "How much the weight of what the Barnacle's tongue carries pulls the tongue down there (per unit of mass)." );
-ConVar of2_barnacle_spacing( "of2_barnacle_spacing", "20", FCVAR_NONE, "The loose part of the Barnacle's tongue is simulated as a point about every this much of its length (up to 48 points), so it is as stiff and hangs the same way whether it is short or long. Smaller is suppler." );
+ConVar of2_barnacle_spacing( "of2_barnacle_spacing", "20", FCVAR_NONE, "The Barnacle's tongue is simulated as a point about every this much of its length (up to 80 points), so it is as stiff and hangs the same way whether it is short or long. Smaller is suppler." );
 ConVar of2_barnacle_drape( "of2_barnacle_drape", "1", FCVAR_NONE, "The length of the Barnacle's tongue lies on and drapes over loose physics objects, as it does over the world. 0: only over the world." );
 ConVar of2_barnacle_slide_speed( "of2_barnacle_slide_speed", "120", FCVAR_NONE, "Where the Barnacle's tongue goes over an edge it slides along the edge, towards where it pulls on it evenly. This is its speed at the hardest pull. 0: it stays where it first touched." );
 ConVar of2_barnacle_slide_friction( "of2_barnacle_slide_friction", "0.35", FCVAR_NONE, "How sticky the Barnacle's tongue is on an edge: how lopsided the pull has to be before it slides along it (0 always, 1 only when dragged almost straight along it). A climb rope has its own, lower." );
@@ -2837,7 +2837,12 @@ void CWeaponBarnacle::TongueThink( void )
 			}
 		}
 
-		if ( m_bReeling || m_bRetracting )
+		// The player's weight does the same as reeling: hanging from it, the
+		// tongue is pulled tight by itself. (The user asked: left as thrown, it
+		// hung in a curve beside the straight line they swung on.)
+		bool bHanging = ( m_iTip == TIP_ANCHORED && pPlayer->GetGroundEntity() == NULL );
+
+		if ( m_bReeling || m_bRetracting || bHanging )
 		{
 			// (slack comes in faster than tongue that pulls, as it does in UpdateLoose)
 			float flSpeed = of2_barnacle_reel_speed.GetFloat() * ( m_bRetracting ? 1.0f : BARNACLE_SLACK_REEL );

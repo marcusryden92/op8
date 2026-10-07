@@ -4593,6 +4593,12 @@ void CBasePlayer::UpdatePlayerSound ( void )
 		{
 			iBodyVolume = 512;
 		}
+
+#ifdef HL2_EPISODIC
+		// OF2: stealth has its own idea of how far that carries (hl2\of2_stealth.cpp)
+		extern float OF2_PlayerMovementNoise( float flSpeed );
+		iBodyVolume = (int)OF2_PlayerMovementNoise( iBodyVolume );
+#endif
 	}
 	else
 	{

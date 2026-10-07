@@ -13,8 +13,9 @@
 #endif
 
 // Most points the tongue is simulated as, from the barnacle out to the tip. How
-// many there are at a time goes by its length.
-#define OF2_TONGUE_NODES		48
+// many there are at a time goes by its length: one about every
+// of2_barnacle_spacing units, so this is enough for 1580 units at the default 20.
+#define OF2_TONGUE_NODES		80
 
 // Edges the straight way from the barnacle to the tip goes over (the same as
 // OF2_TETHER_MAX_PIVOTS)

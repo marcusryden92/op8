@@ -36,7 +36,7 @@ ConVar of2_stealth_dark_police( "of2_stealth_dark_police", "0", FCVAR_NONE, "Ste
 ConVar of2_police_flashlight( "of2_police_flashlight", "1", FCVAR_NONE, "Metrocops have a head flashlight. What it shines on, they (and everyone) can see. Per cop: the of2_flashlight keyvalue, 0 never, 1 where it is dark, 2 always." );
 ConVar of2_police_flashlight_range( "of2_police_flashlight_range", "600", FCVAR_NONE, "Reach of a metrocop's flashlight: how far the beam goes and how far it lets them see." );
 ConVar of2_police_flashlight_fov( "of2_police_flashlight_fov", "50", FCVAR_NONE, "Cone of a metrocop's flashlight in degrees: what it lets them see, and how wide the light lands." );
-ConVar of2_police_flashlight_beam( "of2_police_flashlight_beam", "90", FCVAR_NONE, "How visible the cone of light from a metrocop's flashlight is in the air (0-255; 0 for none)." );
+ConVar of2_police_flashlight_beam( "of2_police_flashlight_beam", "10", FCVAR_NONE, "How visible the cone of light from a metrocop's flashlight is in the air (0-255; 0 for none)." );
 ConVar of2_police_flashlight_beam_length( "of2_police_flashlight_beam_length", "320", FCVAR_NONE, "How far from the head that cone reaches before it has faded out. It widens at the light's own angle (of2_police_flashlight_fov)." );
 ConVar of2_police_flashlight_pool( "of2_police_flashlight_pool", "160", FCVAR_NONE, "Widest the pool of light gets where a metrocop's flashlight lands, in units." );
 ConVar of2_police_flashlight_projected( "of2_police_flashlight_projected", "1", FCVAR_NONE, "1: a metrocop's flashlight is a projected texture, which casts shadows, instead of a beam and a pool of light. Shines backwards too on any surface not drawn by Mapbase's SDK_ shaders. Can be switched while one is on." );
@@ -682,7 +682,7 @@ public:
 	{
 		m_flConeFOV = 50.0f;
 		m_flConeLength = 320.0f;
-		m_flConeBrightness = 0.35f;
+		m_flConeBrightness = 0.04f;
 	}
 
 	void	Precache( void ) { PrecacheMaterial( "effects/of2_lightcone" ); PrecacheMaterial( "effects/of2_lightcone_inside" ); }

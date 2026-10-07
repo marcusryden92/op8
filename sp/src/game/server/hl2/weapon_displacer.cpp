@@ -12,6 +12,7 @@
 //=============================================================================//
 
 #include "cbase.h"
+#include "soundent.h"
 #include "basehlcombatweapon.h"
 #include "player.h"
 #include "in_buttons.h"
@@ -56,6 +57,7 @@
 #define DISPLACER_CORE_COLOR		230, 255, 248
 
 ConVar of2_displacer_range( "of2_displacer_range", "2500", FCVAR_NONE, "How far away a Displacer destination or target can be marked, and how far the player can get from it before the signal is lost." );
+ConVar of2_displacer_noise( "of2_displacer_noise", "10000", FCVAR_NONE, "How far NPCs hear a Displacer teleport, in units, from where the thing left and from where it arrived (an explosion: of2_explosion_noise, 30000). 0 for silent." );
 ConVar of2_displacer_cooldown( "of2_displacer_cooldown", "0.5", FCVAR_NONE, "Seconds between Displacer shots or self-teleports." );
 ConVar of2_displacer_clear_hold( "of2_displacer_clear_hold", "0.5", FCVAR_NONE, "Holding reload this long clears the Displacer destination; letting go sooner teleports the player." );
 ConVar of2_displacer_portal_speed( "of2_displacer_portal_speed", "2600", FCVAR_NONE, "Speed of the Displacer's portal projectile." );
@@ -515,7 +517,7 @@ CDisplacerPortal *CDisplacerPortal::PortalCreate( const Vector &vecOrigin, const
 	pPortal->SpriteInit( DISPLACER_GLOW_SPRITE, vecOrigin );
 
 	pPortal->SetTransparency( kRenderTransAdd, DISPLACER_GLOW_COLOR, 255, kRenderFxNone );
-	pPortal->SetScale( 0.45f );
+	pPortal->SetScale( 0.675f );	// OF2: half again as large as the first 0.45
 
 	pPortal->SetSolid( SOLID_BBOX );
 	pPortal->AddSolidFlags( FSOLID_NOT_STANDABLE );
@@ -1013,6 +1015,15 @@ bool CWeaponDisplacer::DisplaceEntity( CBaseEntity *pEntity )
 
 	Displacer_TeleportEffect( vecFrom, flRadius, NULL, "Weapon_Displacer.TeleportOut" );
 	Displacer_TeleportEffect( pEntity->WorldSpaceCenter(), flRadius, pEntity, "Weapon_Displacer.TeleportIn" );
+
+	// OF2: Stealth. A teleport is nearly as loud as an explosion, at both ends, whatever
+	// went through (the user asked for this, the player included). Nobody's sound: it is
+	// a noise to come and look at, not word of where the player is.
+	if ( of2_displacer_noise.GetInt() > 0 )
+	{
+		CSoundEnt::InsertSound( SOUND_COMBAT, vecFrom, of2_displacer_noise.GetInt(), 0.3f, NULL );
+		CSoundEnt::InsertSound( SOUND_COMBAT, pEntity->WorldSpaceCenter(), of2_displacer_noise.GetInt(), 0.3f, NULL );
+	}
 
 	return true;
 }

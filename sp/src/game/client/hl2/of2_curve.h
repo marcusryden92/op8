@@ -12,7 +12,7 @@
 #pragma once
 #endif
 
-#define OF2_CURVE_MAX_POINTS	96
+#define OF2_CURVE_MAX_POINTS	128
 
 struct OF2CurveStyle_t
 {

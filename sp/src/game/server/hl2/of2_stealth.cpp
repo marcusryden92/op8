@@ -69,7 +69,8 @@ static ConVar of2_stealth_see_decay( "of2_stealth_see_decay", "0.2", FCVAR_NONE,
 static ConVar of2_stealth_blind( "of2_stealth_blind", "0.05", FCVAR_NONE, "Stealth: player visibility (0-1) at and below which an NPC without night vision cannot see them at all." );
 
 // Hearing
-static ConVar of2_stealth_hear_footsteps( "of2_stealth_hear_footsteps", "0.75", FCVAR_NONE, "Stealth: how far the player's movement carries, against stock (stock: as many units as the player's speed)." );
+static ConVar of2_stealth_hear_footsteps( "of2_stealth_hear_footsteps", "0.75", FCVAR_NONE, "Stealth: how far the player's movement carries when slow (crouched, sneaking), as a multiple of their speed in units. Stock is 1." );
+static ConVar of2_stealth_hear_running( "of2_stealth_hear_running", "2.4", FCVAR_NONE, "Stealth: how far the player's movement carries at a run and faster, as a multiple of their speed in units: 2.4 is about 11 m at a run (190) and 19 m sprinting. Between sneaking and running it goes from the one to the other." );
 static ConVar of2_stealth_hear_walls( "of2_stealth_hear_walls", "0.5", FCVAR_NONE, "Stealth: how far the player's sounds carry to an NPC that cannot see where they come from, as a fraction (stock: not at all while idle)." );
 static ConVar of2_stealth_footstep_rate( "of2_stealth_footstep_rate", "0.5", FCVAR_NONE, "Stealth: suspicion per second from hearing the player move close by." );
 static ConVar of2_stealth_noise_scale( "of2_stealth_noise_scale", "1.0", FCVAR_NONE, "Stealth: scales the suspicion from every single noise (impacts, doors, shots)." );
@@ -499,18 +500,29 @@ static CSound *PlayerBodySound( void )
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: Is a SOUND_PLAYER sound loud enough here? Movement carries less far
-//			than stock, and anything it cannot see the source of less again
+// Purpose: How far the player's movement is heard, from how far stock has it
+//			(as many units as their speed). For CBasePlayer::UpdatePlayerSound:
+//			it has to be in the sound itself, since no NPC is asked about a
+//			sound further off than its volume. Sneaking is quieter than stock,
+//			so that a crouched player still gets within reach of a knife;
+//			running is a good deal louder (the user: about 10 m behind a cop).
+//-----------------------------------------------------------------------------
+float OF2_PlayerMovementNoise( float flSpeed )
+{
+	if ( !of2_stealth.GetBool() )
+		return flSpeed;
+
+	return flSpeed * RemapValClamped( flSpeed, 80.0f, 190.0f, of2_stealth_hear_footsteps.GetFloat(), of2_stealth_hear_running.GetFloat() );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Is a SOUND_PLAYER sound loud enough here? Anything it cannot see
+//			the source of carries less far
 //			(stock: an idle NPC does not hear those at all, doors included).
 //-----------------------------------------------------------------------------
 bool COF2Awareness::CanHearPlayerSound( CSound *pSound )
 {
 	float flVolume = pSound->Volume() * m_pOuter->HearingSensitivity();
-
-	if ( pSound == PlayerBodySound() )
-	{
-		flVolume *= of2_stealth_hear_footsteps.GetFloat();
-	}
 
 	float flDist = pSound->GetSoundOrigin().DistTo( m_pOuter->EarPosition() );
 	if ( flDist > flVolume )
@@ -604,8 +616,9 @@ void COF2Awareness::HearSounds( void )
 		switch ( pSound->SoundTypeNoContext() )
 		{
 		case SOUND_WORLD:
-			// Prop impacts: a can is a fifth of this, a thrown barrel all of it
-			flAmount = clamp( flVolume / 1000.0f, 0.15f, 1.0f );
+			// Prop impacts: something nudged makes it look up, something thrown
+			// (a bottle is 550 or so) is worth going to see
+			flAmount = clamp( flVolume / 700.0f, 0.3f, 1.0f );
 			break;
 
 		case SOUND_PLAYER:
@@ -1187,7 +1200,7 @@ float OF2_GetPlayerNoise( CBasePlayer *pPlayer )
 	CSound *pBodySound = PlayerBodySound();
 	if ( pBodySound )
 	{
-		flRadius = pBodySound->Volume() * of2_stealth_hear_footsteps.GetFloat();
+		flRadius = pBodySound->Volume();
 	}
 
 	for ( int iSound = CSoundEnt::ActiveList(); iSound != SOUNDLIST_EMPTY; )
@@ -1239,10 +1252,11 @@ void OF2_PropImpactNoise( CBaseEntity *pProp, int index, gamevcollisionevent_t *
 	if ( pOther && pOther->IsNPC() )
 		return;
 
-	// Heavier is louder, but not in proportion: a can at throwing speed has to
-	// carry across a room
+	// Heavier is louder, but not in proportion: a bottle at throwing speed (300 and
+	// up) has to carry a little further than the player running does (the user's
+	// measure; at 0.6 here they were barely noticed)
 	float flMass = MIN( pEvent->pObjects[index]->GetMass(), 100.0f );
-	float flRadius = flSpeed * ( 0.6f + 0.25f * sqrt( flMass ) ) * of2_stealth_impact_scale.GetFloat();
+	float flRadius = flSpeed * ( 1.6f + 0.25f * sqrt( flMass ) ) * of2_stealth_impact_scale.GetFloat();
 	flRadius = MIN( flRadius, of2_stealth_impact_max.GetFloat() );
 	if ( flRadius < 1.0f )
 		return;

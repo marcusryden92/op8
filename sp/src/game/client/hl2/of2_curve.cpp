@@ -36,6 +36,8 @@
 // side between, so that it is a hot line with a soft glow around it
 #define TUBE_COLUMNS		9
 #define TUBE_MIDDLE			4
+// Most pieces of a tube's length drawn as one mesh
+#define TUBE_RUN			256
 // How far out the points just inside the edges are
 #define TUBE_SHOULDER		0.85f
 // Where the highlight's in-between points are, as a share of its half-width,
@@ -367,15 +369,19 @@ static void DrawTube( IMaterial *pMaterial, const Vector *pPos, const Vector *pC
 		s_vecView[i] = vecView;
 	}
 
+	// (in runs: a long tongue drawn finely is more than one mesh may hold)
+	for ( int iFrom = 0; iFrom < nCount - 1; iFrom += TUBE_RUN )
 	{
+		int nRun = MIN( TUBE_RUN, nCount - 1 - iFrom );
+
 		CMatRenderContextPtr pRenderContext( materials );
 		IMesh *pMesh = pRenderContext->GetDynamicMesh( true, NULL, NULL, pMaterial );
 
 		CMeshBuilder meshBuilder;
-		meshBuilder.Begin( pMesh, MATERIAL_QUADS, ( nCount - 1 ) * ( TUBE_COLUMNS - 1 ) );
+		meshBuilder.Begin( pMesh, MATERIAL_QUADS, nRun * ( TUBE_COLUMNS - 1 ) );
 
 		static const int iCorner[4][2] = { { 0, 0 }, { 0, 1 }, { 1, 1 }, { 1, 0 } };
-		for ( int i = 0; i < nCount - 1; i++ )
+		for ( int i = iFrom; i < iFrom + nRun; i++ )
 		{
 			for ( int c = 0; c < TUBE_COLUMNS - 1; c++ )
 			{

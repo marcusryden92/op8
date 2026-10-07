@@ -16,7 +16,8 @@
 #ifdef HL2_EPISODIC
 // OF2: Stealth. See CSoundEnt::InsertSound.
 ConVar of2_gunfire_volume( "of2_gunfire_volume", "1500", FCVAR_NONE, "How far NPCs hear the player's quietest gun, in units, before of2_gunfire_carry (stock: 600 to 1500 depending on the gun)." );
-ConVar of2_gunfire_carry( "of2_gunfire_carry", "2.5", FCVAR_NONE, "Multiplies how far NPCs hear the player's gunfire (1 = stock distances). The K98 has its own base, of2_k98_noise." );
+ConVar of2_gunfire_carry( "of2_gunfire_carry", "5", FCVAR_NONE, "Multiplies how far NPCs hear the player's gunfire (1 = stock distances). The K98 has its own base, of2_k98_noise." );
+ConVar of2_explosion_noise( "of2_explosion_noise", "30000", FCVAR_NONE, "How far NPCs hear an explosion, in units, whoever set it off: the default is any map from end to end (stock: one and a half times its blast radius). 0 leaves them stock." );
 #endif
 
 //-----------------------------------------------------------------------------
@@ -472,6 +473,14 @@ void CSoundEnt::InsertSound ( int iType, const Vector &vecOrigin, int iVolume, f
 	if ( ( iType & SOUND_COMBAT ) && !( iType & SOUND_CONTEXT_EXPLOSION ) && pOwner && pOwner->IsPlayer() && iVolume > SOUNDENT_VOLUME_EMPTY )
 	{
 		iVolume = (int)( MAX( iVolume, of2_gunfire_volume.GetFloat() ) * of2_gunfire_carry.GetFloat() );
+	}
+
+	// OF2: Explosions are heard everywhere (the user: from across the entire map). Every blast
+	// comes through RadiusDamage, which marks its sound as one. Not the small ones (stock gives
+	// a sound one and a half times the blast radius): a combine ball going off is 180.
+	if ( ( iType & SOUND_COMBAT ) && ( iType & SOUND_CONTEXT_EXPLOSION ) && iVolume > 200 )
+	{
+		iVolume = MAX( iVolume, of2_explosion_noise.GetInt() );
 	}
 #endif
 
