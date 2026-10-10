@@ -33,20 +33,7 @@
 // OF2: Stealth. Cops have no night vision; they have a light on the head. The rest of the
 // stealth convars are in of2_stealth.cpp.
 ConVar of2_stealth_dark_police( "of2_stealth_dark_police", "0", FCVAR_NONE, "Stealth: how fast metrocops make out a player in complete darkness, against one in the light. 0: they cannot see into the dark at all (of2_stealth_blind), and lose sight of a player who steps into it. 1: as if they had night vision." );
-ConVar of2_police_flashlight( "of2_police_flashlight", "1", FCVAR_NONE, "Metrocops have a head flashlight. What it shines on, they (and everyone) can see. Per cop: the of2_flashlight keyvalue, 0 never, 1 where it is dark, 2 always." );
-ConVar of2_police_flashlight_range( "of2_police_flashlight_range", "600", FCVAR_NONE, "Reach of a metrocop's flashlight: how far the beam goes and how far it lets them see." );
-ConVar of2_police_flashlight_fov( "of2_police_flashlight_fov", "50", FCVAR_NONE, "Cone of a metrocop's flashlight in degrees: what it lets them see, and how wide the light lands." );
-ConVar of2_police_flashlight_beam( "of2_police_flashlight_beam", "10", FCVAR_NONE, "How visible the cone of light from a metrocop's flashlight is in the air (0-255; 0 for none)." );
-ConVar of2_police_flashlight_beam_length( "of2_police_flashlight_beam_length", "320", FCVAR_NONE, "How far from the head that cone reaches before it has faded out. It widens at the light's own angle (of2_police_flashlight_fov)." );
-ConVar of2_police_flashlight_pool( "of2_police_flashlight_pool", "160", FCVAR_NONE, "Widest the pool of light gets where a metrocop's flashlight lands, in units." );
-ConVar of2_police_flashlight_projected( "of2_police_flashlight_projected", "1", FCVAR_NONE, "1: a metrocop's flashlight is a projected texture, which casts shadows, instead of a beam and a pool of light. Shines backwards too on any surface not drawn by Mapbase's SDK_ shaders. Can be switched while one is on." );
-ConVar of2_police_flashlight_dark( "of2_police_flashlight_dark", "0.2", FCVAR_NONE, "A metrocop has its flashlight on where the brightness is below this (0-1, the 'light' figure of of2_stealth_light_debug)." );
-ConVar of2_police_flashlight_hold( "of2_police_flashlight_hold", "6", FCVAR_NONE, "Until the game knows how dark it is where a metrocop stands: seconds its flashlight stays on after it has calmed down." );
-ConVar of2_police_flashlight_glow_offset( "of2_police_flashlight_glow_offset", "-3 -4.5 1", FCVAR_NONE, "Where the glow sprite sits from between the eyes: forward, left, up. Read when the light is first switched on." );
-ConVar of2_police_flashlight_glow_scale( "of2_police_flashlight_glow_scale", "0.1", FCVAR_NONE, "Size of the glow sprite. Read when the light is first switched on." );
 
-#define POLICE_FLASHLIGHT_GLOW		"sprites/light_glow03.vmt"
-#define POLICE_FLASHLIGHT_LIT_TIME	0.5f	// the player stays lit this long after the beam was on them (a think or two)
 
 //#define SF_METROPOLICE_					0x00010000
 #define SF_METROPOLICE_SIMPLE_VERSION		0x00020000
@@ -289,13 +276,7 @@ BEGIN_DATADESC( CNPC_MetroPolice )
 	DEFINE_EMBEDDED( m_Stealth ),
 	DEFINE_KEYFIELD( m_bStealthDisabled, FIELD_BOOLEAN, "of2_nostealth" ),
 	DEFINE_KEYFIELD( m_iFlashlightMode, FIELD_INTEGER, "of2_flashlight" ),
-	DEFINE_FIELD( m_bFlashlightOn, FIELD_BOOLEAN ),
-	DEFINE_FIELD( m_flAmbientLight, FIELD_FLOAT ),
-	DEFINE_FIELD( m_flFlashlightOffTime, FIELD_TIME ),
-	DEFINE_FIELD( m_hFlashlight, FIELD_EHANDLE ),
-	DEFINE_FIELD( m_hFlashlightGlow, FIELD_EHANDLE ),
-	DEFINE_FIELD( m_hFlashlightEnd, FIELD_EHANDLE ),
-	DEFINE_FIELD( m_hFlashlightProjected, FIELD_EHANDLE ),
+	DEFINE_EMBEDDED( m_Flashlight ),
 	DEFINE_INPUTFUNC( FIELD_VOID, "EnableStealth", InputEnableStealth ),
 	DEFINE_INPUTFUNC( FIELD_VOID, "DisableStealth", InputDisableStealth ),
 	DEFINE_INPUTFUNC( FIELD_INTEGER, "SetFlashlightMode", InputSetFlashlightMode ),
@@ -528,6 +509,10 @@ void CNPC_MetroPolice::NotifyDeadFriend( CBaseEntity* pFriend )
 	if ( FClassnameIs( pFriend, "npc_manhack" ) )
 		return;
 
+	// OF2: Stealth. Only one who saw it, or is alerted already, knows and says so
+	if ( !m_Stealth.WitnessDeath( pFriend ) )
+		return;
+
 	// Reset idle chatter, we may never get a response back
 	if ( m_nIdleChatterType == METROPOLICE_CHATTER_WAIT_FOR_RESPONSE )
 	{
@@ -562,13 +547,10 @@ CNPC_MetroPolice::CNPC_MetroPolice()
 #endif
 
 	// OF2
-	m_Stealth.Init( this );
+	m_Stealth.Init( this, &m_Flashlight );
 	m_bStealthDisabled = false;
 	m_iFlashlightMode = 1;
-	m_bFlashlightOn = false;
-	m_flAmbientLight = -1.0f;
-	m_bFlashlightOnSpot = false;
-	m_flFlashlightOffTime = 0.0f;
+	m_Flashlight.Init( this );
 }
 
 //-----------------------------------------------------------------------------
@@ -667,382 +649,11 @@ int CNPC_MetroPolice::SelectStealthSchedule( void )
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: OF2: The light a flashlight makes in the air. Nothing here but its
-//			place (it rides on the eyes) and three numbers; the client draws
-//			it (client\hl2\c_of2_stealth.cpp).
-//-----------------------------------------------------------------------------
-class COF2LightCone : public CBaseEntity
-{
-	DECLARE_CLASS( COF2LightCone, CBaseEntity );
-
-public:
-	DECLARE_SERVERCLASS();
-
-	COF2LightCone()
-	{
-		m_flConeFOV = 50.0f;
-		m_flConeLength = 320.0f;
-		m_flConeBrightness = 0.04f;
-	}
-
-	void	Precache( void ) { PrecacheMaterial( "effects/of2_lightcone" ); PrecacheMaterial( "effects/of2_lightcone_inside" ); }
-	void	Spawn( void )
-	{
-		Precache();
-		SetSolid( SOLID_NONE );
-		SetMoveType( MOVETYPE_NONE );
-	}
-
-	// Sent whenever the one wearing it is
-	int		UpdateTransmitState( void ) { return SetTransmitState( FL_EDICT_FULLCHECK ); }
-	int		ShouldTransmit( const CCheckTransmitInfo *pInfo )
-	{
-		CBaseEntity *pParent = GetMoveParent();
-		return pParent ? pParent->ShouldTransmit( pInfo ) : FL_EDICT_DONTSEND;
-	}
-
-	// Its owner makes it again
-	int		ObjectCaps( void ) { return ( BaseClass::ObjectCaps() & ~FCAP_ACROSS_TRANSITION ) | FCAP_DONT_SAVE; }
-
-	CNetworkVar( float, m_flConeFOV );			// degrees, edge to edge
-	CNetworkVar( float, m_flConeLength );
-	CNetworkVar( float, m_flConeBrightness );	// 0-1
-};
-
-LINK_ENTITY_TO_CLASS( of2_lightcone, COF2LightCone );
-
-IMPLEMENT_SERVERCLASS_ST( COF2LightCone, DT_OF2LightCone )
-	SendPropFloat( SENDINFO( m_flConeFOV ), 0, SPROP_NOSCALE ),
-	SendPropFloat( SENDINFO( m_flConeLength ), 0, SPROP_NOSCALE ),
-	SendPropFloat( SENDINFO( m_flConeBrightness ), 0, SPROP_NOSCALE ),
-END_SEND_TABLE()
-
-//-----------------------------------------------------------------------------
-// Purpose: OF2: The head flashlight, built the way HL2 builds its own NPC
-//			lights (the scanner's): a beam from the eyes to where it lands, and
-//			a "spotlight_end" there, which the client turns into a pool of
-//			light. Plus a glow on the side of the head to show it is on.
-//
-//			It was a projected texture at first. That shone backwards as well
-//			(a second light behind the cop, cut off along brush edges): the
-//			stock world shader does not clip a projection behind its origin,
-//			which nobody sees on the player's own flashlight, and Mapbase's
-//			shaders that do are not compiled for this mod.
-//-----------------------------------------------------------------------------
-bool CNPC_MetroPolice::GetFlashlightRay( Vector *pOrigin, Vector *pForward )
-{
-	int iAttachment = LookupAttachment( "eyes" );
-	QAngle angEyes;
-	if ( iAttachment > 0 && GetAttachment( iAttachment, *pOrigin, angEyes ) )
-	{
-		AngleVectors( angEyes, pForward );
-		return true;
-	}
-
-	// No eyes on this model: from the head, the way the body faces
-	*pOrigin = EyePosition();
-	*pForward = BodyDirection3D();
-	return false;
-}
-
-void CNPC_MetroPolice::SetFlashlight( bool bOn )
-{
-	bool bWasOn = m_bFlashlightOn;
-	m_bFlashlightOn = bOn;
-
-	if ( !bOn )
-	{
-		UTIL_Remove( m_hFlashlight );
-		UTIL_Remove( m_hFlashlightEnd );
-		UTIL_Remove( m_hFlashlightProjected );
-		m_hFlashlight = NULL;
-		m_hFlashlightEnd = NULL;
-		m_hFlashlightProjected = NULL;
-	}
-	else
-	{
-		Vector vecOrigin, vecForward;
-		bool bHasEyes = GetFlashlightRay( &vecOrigin, &vecForward );
-		int iAttachment = bHasEyes ? LookupAttachment( "eyes" ) : 0;
-
-		// The other kind of light (of2_police_flashlight_projected): a projected texture,
-		// with shadows. Only right on surfaces drawn by Mapbase's SDK_ shaders; see above.
-		bool bProjected = of2_police_flashlight_projected.GetBool();
-		if ( bProjected )
-		{
-			UTIL_Remove( m_hFlashlightEnd );
-			m_hFlashlightEnd = NULL;
-
-			if ( !m_hFlashlightProjected )
-			{
-				CBaseEntity *pLight = CreateEntityByName( "env_projectedtexture" );
-				if ( pLight )
-				{
-					pLight->KeyValue( "lightfov", of2_police_flashlight_fov.GetString() );
-					pLight->KeyValue( "nearz", "12" );		// past its own face
-					pLight->KeyValue( "farz", of2_police_flashlight_range.GetString() );
-					pLight->KeyValue( "enableshadows", "1" );
-					pLight->KeyValue( "brightnessscale", "1.5" );
-					pLight->KeyValue( "texturename", "effects/flashlight001" );
-					pLight->KeyValue( "spawnflags", "3" );	// on, and follows its parent every frame
-					pLight->SetAbsOrigin( vecOrigin );
-					pLight->SetAbsAngles( GetAbsAngles() );
-					DispatchSpawn( pLight );
-					pLight->Activate();
-
-					if ( iAttachment > 0 )
-					{
-						pLight->SetParent( this, iAttachment );
-						pLight->SetLocalOrigin( vec3_origin );
-					}
-					else
-					{
-						pLight->SetParent( this );
-						pLight->SetLocalOrigin( Vector( 8, 0, 64 ) );
-					}
-					pLight->SetLocalAngles( vec3_angle );
-
-					m_hFlashlightProjected = pLight;
-				}
-			}
-		}
-		else
-		{
-			UTIL_Remove( m_hFlashlightProjected );
-			m_hFlashlightProjected = NULL;
-		}
-
-		if ( !bProjected && !m_hFlashlightEnd )
-		{
-			trace_t tr;
-			UTIL_TraceLine( vecOrigin, vecOrigin + vecForward * of2_police_flashlight_range.GetFloat(), MASK_OPAQUE, this, COLLISION_GROUP_NONE, &tr );
-
-			CSpotlightEnd *pEnd = (CSpotlightEnd *)CreateEntityByName( "spotlight_end" );
-			if ( pEnd )
-			{
-				pEnd->Spawn();
-				pEnd->SetAbsOrigin( tr.endpos );
-				pEnd->SetOwnerEntity( this );
-				// Moved once a think: interpolate over that, not every tick
-				pEnd->SetSimulatedEveryTick( false );
-				pEnd->SetRenderColor( 255, 250, 235 );
-				// The client multiplies the colour by this into a byte: 1 is full, 255 wraps to black
-				pEnd->SetRenderColorA( 1 );
-				pEnd->m_Radius = of2_police_flashlight_range.GetFloat();
-				m_hFlashlightEnd = pEnd;
-			}
-		}
-
-		// The light in the air: a cone on the eyes, at the light's own angle, which the
-		// client draws (of2_lightcone, below). It was a beam, which is a flat strip and
-		// can be no wider than about 100 units. (Not saved; this is also where it comes
-		// back after a load.)
-		if ( !m_hFlashlight )
-		{
-			COF2LightCone *pCone = (COF2LightCone *)CreateEntityByName( "of2_lightcone" );
-			if ( pCone )
-			{
-				pCone->SetAbsOrigin( vecOrigin );
-				DispatchSpawn( pCone );
-
-				if ( iAttachment > 0 )
-				{
-					pCone->SetParent( this, iAttachment );
-					pCone->SetLocalOrigin( vec3_origin );
-				}
-				else
-				{
-					pCone->SetParent( this );
-					pCone->SetLocalOrigin( Vector( 8, 0, 64 ) );
-				}
-				pCone->SetLocalAngles( vec3_angle );
-
-				m_hFlashlight = pCone;
-			}
-		}
-
-		if ( !m_hFlashlightGlow )
-		{
-			CSprite *pGlow = CSprite::SpriteCreate( POLICE_FLASHLIGHT_GLOW, GetAbsOrigin(), false );
-			if ( pGlow )
-			{
-				Vector vecOffset( -3, -4.5, 1 );
-				UTIL_StringToVector( vecOffset.Base(), of2_police_flashlight_glow_offset.GetString() );
-
-				if ( iAttachment > 0 )
-				{
-					pGlow->SetParent( this, iAttachment );
-					pGlow->SetLocalOrigin( vecOffset );
-				}
-				else
-				{
-					pGlow->SetParent( this );
-					pGlow->SetLocalOrigin( Vector( 0, 0, 66 ) + vecOffset );
-				}
-
-				pGlow->SetTransparency( kRenderGlow, 255, 250, 235, 255, kRenderFxNoDissipation );
-				pGlow->SetScale( of2_police_flashlight_glow_scale.GetFloat() );
-				pGlow->SetGlowProxySize( 2.0f );
-
-				m_hFlashlightGlow = pGlow;
-			}
-		}
-	}
-
-	CSprite *pGlow = dynamic_cast<CSprite *>( m_hFlashlightGlow.Get() );
-	if ( pGlow )
-	{
-		if ( bOn )
-		{
-			pGlow->TurnOn();
-		}
-		else
-		{
-			pGlow->TurnOff();
-		}
-	}
-
-	if ( bOn != bWasOn )
-	{
-		EmitSound( bOn ? "HL2Player.FlashLightOn" : "HL2Player.FlashLightOff" );
-	}
-}
-
-//-----------------------------------------------------------------------------
-// Purpose: OF2: Once per think. Switches the flashlight; while it is on, keeps
-//			the far end where the cop is looking and tells the stealth code when
-//			the player is in the beam.
-//-----------------------------------------------------------------------------
-void CNPC_MetroPolice::UpdateFlashlight( void )
-{
-	bool bWant = false;
-	bool bAuto = of2_police_flashlight.GetBool() && IsAlive() && m_iFlashlightMode == 1;
-
-	// Only the client knows how dark it is here. This asks it to say.
-	if ( m_bOF2WantsLight != bAuto )
-	{
-		m_bOF2WantsLight = bAuto;
-	}
-
-	if ( of2_police_flashlight.GetBool() && IsAlive() )
-	{
-		if ( m_iFlashlightMode >= 2 )
-		{
-			bWant = true;
-		}
-		else if ( m_iFlashlightMode == 1 && m_flAmbientLight >= 0.0f )
-		{
-			// On wherever it is dark, calm or not (the user: a cop standing in the pitch
-			// black with its light off makes no sense). A little apart so it does not flicker.
-			float flDark = of2_police_flashlight_dark.GetFloat();
-			bWant = m_flAmbientLight < ( m_bFlashlightOn ? flDark + 0.08f : flDark );
-		}
-		else if ( m_iFlashlightMode == 1 )
-		{
-			// Not heard from the client yet (it only reports on cops it can see):
-			// on while looking for someone or fighting
-			if ( GetEnemy() || ( m_Stealth.IsEnabled() && m_Stealth.State() != AWARE_UNAWARE ) )
-			{
-				m_flFlashlightOffTime = gpGlobals->curtime + of2_police_flashlight_hold.GetFloat();
-			}
-			bWant = ( gpGlobals->curtime < m_flFlashlightOffTime );
-		}
-	}
-
-	// (On but without its light: just loaded, or the kind of light was switched)
-	bool bProjected = of2_police_flashlight_projected.GetBool();
-	bool bHasLight = m_hFlashlight != NULL && ( bProjected ? ( m_hFlashlightProjected != NULL && !m_hFlashlightEnd ) : ( m_hFlashlightEnd != NULL && !m_hFlashlightProjected ) );
-	if ( bWant != m_bFlashlightOn || ( bWant && !bHasLight ) )
-	{
-		SetFlashlight( bWant );
-	}
-
-	m_bFlashlightOnSpot = false;
-
-	if ( !m_bFlashlightOn )
-		return;
-
-	Vector vecOrigin, vecForward;
-	GetFlashlightRay( &vecOrigin, &vecForward );
-
-	float flRange = MAX( of2_police_flashlight_range.GetFloat(), 64.0f );
-	float flMinDot = cos( DEG2RAD( of2_police_flashlight_fov.GetFloat() * 0.5f ) );
-
-	CSpotlightEnd *pEnd = dynamic_cast<CSpotlightEnd *>( m_hFlashlightEnd.Get() );
-	if ( pEnd )
-	{
-		// Where it lands. The end is moved by velocity, so it glides between thinks;
-		// a big jump (the beam coming off an edge) goes there at once.
-		trace_t tr;
-		UTIL_TraceLine( vecOrigin, vecOrigin + vecForward * flRange, MASK_OPAQUE, this, COLLISION_GROUP_NONE, &tr );
-
-		Vector vecDelta = tr.endpos - pEnd->GetAbsOrigin();
-		Vector vecVelocity = vecDelta * 10.0f;
-		if ( vecVelocity.Length() > 600.0f )
-		{
-			pEnd->SetAbsOrigin( tr.endpos );
-			vecVelocity = vec3_origin;
-		}
-		pEnd->SetAbsVelocity( vecVelocity );
-
-		pEnd->m_vSpotlightOrg = vecOrigin;
-		pEnd->m_vSpotlightDir = pEnd->GetAbsOrigin() - vecOrigin;
-		float flLength = VectorNormalize( pEnd->m_vSpotlightDir );
-
-		// The pool of light: as wide as the cone is there, and gone at the end of its reach
-		float flPool = clamp( flLength * tan( DEG2RAD( of2_police_flashlight_fov.GetFloat() * 0.5f ) ), 24.0f, of2_police_flashlight_pool.GetFloat() );
-		pEnd->m_flLightScale = ( tr.fraction < 1.0f ) ? flPool / 3.0f : 0.0f;	// the client makes the radius three times this
-		pEnd->m_Radius = flRange;
-	}
-
-	COF2LightCone *pCone = dynamic_cast<COF2LightCone *>( m_hFlashlight.Get() );
-	if ( pCone )
-	{
-		pCone->m_flConeFOV = clamp( of2_police_flashlight_fov.GetFloat(), 1.0f, 170.0f );
-		pCone->m_flConeLength = clamp( of2_police_flashlight_beam_length.GetFloat(), 16.0f, flRange );
-		pCone->m_flConeBrightness = clamp( of2_police_flashlight_beam.GetFloat() / 255.0f, 0.0f, 1.0f );
-	}
-
-	// For the stealth code: is the place it last knew the player to be in the beam?
-	if ( GetEnemy() )
-	{
-		Vector vecToSpot = ( GetEnemyLKP() + Vector( 0, 0, 40 ) ) - vecOrigin;
-		float flSpotDist = VectorNormalize( vecToSpot );
-		m_bFlashlightOnSpot = ( flSpotDist <= flRange && DotProduct( vecToSpot, vecForward ) >= flMinDot );
-	}
-
-	// Chest or head in the beam, with nothing in between: lit, for everyone
-	CBasePlayer *pPlayer = AI_GetSinglePlayer();
-	if ( !pPlayer )
-		return;
-
-	for ( int i = 0; i < 2; i++ )
-	{
-		Vector vecSpot = i ? pPlayer->EyePosition() : pPlayer->WorldSpaceCenter();
-		Vector vecTo = vecSpot - vecOrigin;
-		float flDist = VectorNormalize( vecTo );
-		if ( flDist > flRange || DotProduct( vecTo, vecForward ) < flMinDot )
-			continue;
-
-		trace_t trPlayer;
-		UTIL_TraceLine( vecOrigin, vecSpot, MASK_BLOCKLOS, this, COLLISION_GROUP_NONE, &trPlayer );
-		if ( trPlayer.fraction == 1.0f || trPlayer.m_pEnt == pPlayer )
-		{
-			OF2_PlayerLit( POLICE_FLASHLIGHT_LIT_TIME );
-			break;
-		}
-	}
-}
-
-//-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
 void CNPC_MetroPolice::UpdateOnRemove( void )
 {
 	// OF2
-	UTIL_Remove( m_hFlashlight );
-	UTIL_Remove( m_hFlashlightEnd );
-	UTIL_Remove( m_hFlashlightProjected );
-	UTIL_Remove( m_hFlashlightGlow );
+	m_Flashlight.Remove();
 
 	BaseClass::UpdateOnRemove();
 }
@@ -1076,7 +687,8 @@ void CNPC_MetroPolice::PrescheduleThink( void )
 	m_Sentences.UpdateSentenceQueue();
 #endif
 
-	UpdateFlashlight();	// OF2
+	// OF2: The head flashlight (of2_stealth.cpp)
+	m_bOF2WantsLight = m_Flashlight.Update( m_iFlashlightMode, GetEnemy() != NULL || ( m_Stealth.IsEnabled() && m_Stealth.State() != AWARE_UNAWARE ) );
 
 	// Look at near players, always
 	m_bPlayerIsNear = false;
@@ -1184,10 +796,7 @@ void CNPC_MetroPolice::Precache( void )
 	enginesound->PrecacheSentenceGroup( "METROPOLICE" );
 
 	// OF2: Head flashlight
-	PrecacheModel( POLICE_FLASHLIGHT_GLOW );
-	UTIL_PrecacheOther( "of2_lightcone" );
-	UTIL_PrecacheOther( "spotlight_end" );
-	PrecacheScriptSound( "HL2Player.FlashLightOn" );
+	COF2Flashlight::Precache();
 	PrecacheScriptSound( "HL2Player.FlashLightOff" );
 
 	BaseClass::Precache();
@@ -4225,12 +3834,11 @@ void CNPC_MetroPolice::ReleaseManhack( void )
 //-----------------------------------------------------------------------------
 void CNPC_MetroPolice::Event_Killed( const CTakeDamageInfo &info )
 {
+	// OF2: Stealth. A body for the others to come across
+	OF2_BodyAdd( this, info );
+
 	// OF2: The light goes out with the cop
-	UTIL_Remove( m_hFlashlight );
-	UTIL_Remove( m_hFlashlightEnd );
-	UTIL_Remove( m_hFlashlightProjected );
-	UTIL_Remove( m_hFlashlightGlow );
-	m_bFlashlightOn = false;
+	m_Flashlight.Remove();
 
 	// Release the manhack if we're in the middle of deploying him
 	if ( m_hManhack && m_hManhack->IsAlive() )
@@ -5835,6 +5443,7 @@ void CNPC_MetroPolice::StartTask( const Task_t *pTask )
 	case TASK_METROPOLICE_STEALTH_GET_SEARCH_PATH:		m_Stealth.StartTask( STEALTH_TASK_GET_SEARCH_PATH );		break;
 	case TASK_METROPOLICE_STEALTH_GET_PATH_HOME:		m_Stealth.StartTask( STEALTH_TASK_GET_PATH_HOME );			break;
 	case TASK_METROPOLICE_STEALTH_FACE_HOME:			if ( m_Stealth.StartTask( STEALTH_TASK_FACE_HOME ) ) ChainStartTask( TASK_FACE_IDEAL );				break;
+	case TASK_METROPOLICE_STEALTH_FACE_SEARCH:			if ( m_Stealth.StartTask( STEALTH_TASK_FACE_SEARCH ) ) ChainStartTask( TASK_FACE_IDEAL );			break;
 
 	case TASK_METROPOLICE_WAIT_FOR_SENTENCE:
 		{
@@ -6175,6 +5784,7 @@ void CNPC_MetroPolice::RunTask( const Task_t *pTask )
 	// OF2: Stealth
 	case TASK_METROPOLICE_STEALTH_FACE_STIMULUS:
 	case TASK_METROPOLICE_STEALTH_FACE_HOME:
+	case TASK_METROPOLICE_STEALTH_FACE_SEARCH:
 		ChainRunTask( TASK_FACE_IDEAL );
 		break;
 
@@ -6539,12 +6149,48 @@ void CNPC_MetroPolice::GatherConditions( void )
 	m_Stealth.SetDisabled( m_bStealthDisabled );
 	// Can it see that the place it last knew the player to be is empty? Only where there
 	// is light: the room's (as far as it knows: where it stands), or its flashlight's.
-	m_Stealth.SetVision( of2_stealth_dark_police.GetFloat(),
-		m_bFlashlightOnSpot || m_flAmbientLight >= of2_police_flashlight_dark.GetFloat() + 0.08f );
+	m_Stealth.SetVision( of2_stealth_dark_police.GetFloat(), m_Flashlight.IsSpotLit() );
 	m_Stealth.Update();
+	m_Stealth.UpdateFormation( m_FollowBehavior );
+	switch ( m_Stealth.TakeCrouch() )
+	{
+	case 1:
+		// Down to look into a tunnel or under something
+		Crouch();
+		if ( !IsMoving() )
+		{
+			ResetIdealActivity( ACT_IDLE );
+		}
+		break;
+
+	case -1:
+		if ( Stand() && !GetEnemy() && !IsMoving() )
+		{
+			ResetIdealActivity( ACT_IDLE );
+		}
+		break;
+	}
 	if ( m_Stealth.HasChanged() )
 	{
 		SetCondition( COND_METROPOLICE_STEALTH_STIMULUS );
+	}
+	if ( m_Stealth.TakeSaidClear() )
+	{
+		// Searching with the others: that was the last of a room
+#ifdef METROPOLICE_USES_RESPONSE_SYSTEM
+		SpeakIfAllowed( TLK_COP_ANSWER, "combinequestion:0" );
+#else
+		m_Sentences.Speak( "METROPOLICE_IDLE_CLEAR" );
+#endif
+	}
+	if ( m_Stealth.TakeFoundBody() )
+	{
+		// Come across one of its own dead: the line it did not get to say when it happened
+#ifdef METROPOLICE_USES_RESPONSE_SYSTEM
+		SpeakIfAllowed( TLK_COP_MANDOWN, SENTENCE_PRIORITY_MEDIUM, SENTENCE_CRITERIA_NORMAL );
+#else
+		m_Sentences.Speak( "METROPOLICE_MAN_DOWN", SENTENCE_PRIORITY_MEDIUM );
+#endif
 	}
 
 	if ( m_bPlayerTooClose == false )
@@ -6828,6 +6474,7 @@ AI_BEGIN_CUSTOM_NPC( npc_metropolice, CNPC_MetroPolice )
 	DECLARE_TASK( TASK_METROPOLICE_STEALTH_GET_SEARCH_PATH )
 	DECLARE_TASK( TASK_METROPOLICE_STEALTH_GET_PATH_HOME )
 	DECLARE_TASK( TASK_METROPOLICE_STEALTH_FACE_HOME )
+	DECLARE_TASK( TASK_METROPOLICE_STEALTH_FACE_SEARCH )
 
 	DECLARE_CONDITION( COND_METROPOLICE_ON_FIRE );
 	DECLARE_CONDITION( COND_METROPOLICE_ENEMY_RESISTING_ARREST );
@@ -7632,6 +7279,7 @@ DEFINE_SCHEDULE
  "		TASK_METROPOLICE_STEALTH_GET_SEARCH_PATH	0"
  "		TASK_WAIT_FOR_MOVEMENT					0"
  "		TASK_STOP_MOVING						0"
+ "		TASK_METROPOLICE_STEALTH_FACE_SEARCH		0"
  "		TASK_SET_ACTIVITY						ACTIVITY:ACT_IDLE"
  "		TASK_WAIT								1"
  "		TASK_TURN_LEFT							120"

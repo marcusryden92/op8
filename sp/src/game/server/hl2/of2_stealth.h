@@ -21,6 +21,9 @@
 class CAI_BaseNPC;
 class CBasePlayer;
 class CSound;
+class CAI_FollowBehavior;
+class COF2Flashlight;
+class CTakeDamageInfo;
 struct gamevcollisionevent_t;
 
 enum OF2Awareness_t
@@ -39,6 +42,7 @@ enum OF2Stimulus_t
 	STIM_FOOTSTEPS,		// the player moving
 	STIM_GLIMPSE,		// saw something, not long enough to be sure
 	STIM_GUNFIRE,		// shots, explosions, a squadmate hit
+	STIM_BODY,			// found one of its own dead
 	STIM_REPORT,		// a squadmate called it in
 	STIM_LOST_ENEMY,	// was fighting the player and lost them
 };
@@ -65,6 +69,7 @@ enum OF2StealthTask_t
 	STEALTH_TASK_GET_SEARCH_PATH,
 	STEALTH_TASK_GET_PATH_HOME,
 	STEALTH_TASK_FACE_HOME,				// run it with TASK_FACE_IDEAL
+	STEALTH_TASK_FACE_SEARCH,			// run it with TASK_FACE_IDEAL: towards the check point it came to look at, if any
 };
 
 class COF2Awareness
@@ -76,7 +81,8 @@ public:
 	COF2Awareness();
 
 	// Not saved: call from the owner's constructor
-	void	Init( CAI_BaseNPC *pOuter )				{ m_pOuter = pOuter; }
+	// pLight: its flashlight, if it wears one (what that shines on it can see in the dark)
+	void	Init( CAI_BaseNPC *pOuter, COF2Flashlight *pLight = NULL )	{ m_pOuter = pOuter; m_pLight = pLight; }
 
 	// Is the system running for this NPC at all? (convar, per-NPC switch, and it
 	// has to hate the player in the first place)
@@ -133,6 +139,32 @@ public:
 	// Has fought the player, been shot at or heard shots: it does not stand down again
 	bool	KnowsEnemyAbout( void ) const			{ return m_bEnemyAbout; }
 
+	// From NotifyDeadFriend(): a squadmate has died. True if it knows (it saw it happen, or
+	// it is in a fight or looking for someone already) and may say so; false and it carries
+	// on unaware until it comes across the body.
+	bool	WitnessDeath( CBaseEntity *pFriend );
+
+	// Has just come across a body (once per body): the owner says its line
+	bool	TakeFoundBody( void )					{ bool bFound = m_bFoundBody; m_bFoundBody = false; return bFound; }
+
+	// Can it see this place from where it stands: in view, nothing in the way, and
+	// (without night vision) lit?
+	bool	SeesPlace( const Vector &vecPos, float flMaxDist, bool bNeedLight = true );
+
+	// Searching with others: has just seen the last of a room, or of the whole search.
+	// The owner says "clear".
+	bool	TakeSaidClear( void )					{ bool bSay = m_bSayClear; m_bSayClear = false; return bSay; }
+	float	SearchRadius( void );
+
+	// Once per think: 1, the owner is to crouch (to look at a sweep spot marked for it);
+	// -1, to stand again; 0, neither. (Crouch() and Stand() are the owner's to call.)
+	int		TakeCrouch( void )						{ int iWant = m_iCrouchWant; m_iCrouchWant = 0; return iWant; }
+
+	// Once per think, after Update(). Searching in a group: one who does not lead it
+	// walks with the one who does, in formation, through the owner's follow behavior
+	// (the one citizens follow the player with). Leaves a follow target it did not set alone.
+	void	UpdateFormation( CAI_FollowBehavior &follow );
+
 	void	AddEvidence( float flAmount, const Vector &vecPos, OF2Stimulus_t kind );
 
 	//-------------------------------------------------------------------------
@@ -187,7 +219,10 @@ private:
 	bool	KnowsPlayer( CBasePlayer *pPlayer ) const;
 	bool	AlreadyHeard( CSound *pSound );
 	void	AlertSquad( void );
+	void	LookForBodies( void );
+	void	SearchLook( void );
 
+	COF2Flashlight	*m_pLight;
 	CAI_BaseNPC	*m_pOuter;
 
 	int		m_iState;
@@ -209,6 +244,16 @@ private:
 	float	m_flDarkRate;			// not saved: set every think
 	bool	m_bSpotLit;
 	bool	m_bHeardShot;			// inside its own UpdateEnemyMemory() call
+	float	m_flNextBodyLook;		// not saved
+	bool	m_bFoundBody;
+	float	m_flNextSearchLook;
+	bool	m_bSayClear;
+	bool	m_bFollowing;			// its follow behavior's target is its search leader, set by UpdateFormation()
+	bool	m_bSearchFace;			// the search point it is going to is for looking at this
+	Vector	m_vecSearchFace;
+	bool	m_bSearchCrouch;		// ...from a crouch (a sweep spot marked so: a tunnel, under something)
+	float	m_flStandTime;			// crouched for that until then; 0: not. Not saved.
+	int		m_iCrouchWant;
 
 	Vector	m_vecStimulus;
 	int		m_iStimulus;
@@ -254,5 +299,74 @@ void	OF2_PlayerLit( float flDuration );
 // prop from filling the sound list.
 //-----------------------------------------------------------------------------
 void	OF2_PropImpactNoise( CBaseEntity *pProp, int index, gamevcollisionevent_t *pEvent, float &flNextTime );
+
+//-----------------------------------------------------------------------------
+// Bodies. An NPC whose kind reacts to its dead calls OF2_BodyAdd() from
+// Event_Killed(), before the base class (which makes the ragdoll). The place is
+// where it died, or the ragdoll while the server has one (the Barnacle's
+// corpses). Not saved: the bodies themselves do not outlive a load either.
+//-----------------------------------------------------------------------------
+void	OF2_BodyAdd( CBaseEntity *pVictim, const CTakeDamageInfo &info );
+void	OF2_BodyRagdoll( CBaseEntity *pVictim, CBaseEntity *pRagdoll );
+
+// Around a kill that shows where the killer is (the Barnacle snapping a neck: its
+// tongue runs from the victim back to the player): whoever sees it happen knows
+// where the player is, there and then. NULL again once the damage is done.
+void	OF2_KillLeadsTo( CBasePlayer *pKiller );
+
+//-----------------------------------------------------------------------------
+// OF2: The head flashlight of an NPC without night vision (metrocops, ordinary
+// soldiers): a cone of light in the air, a glow on the head, and either a
+// projected light or a pool of light where it lands. What it shines on, the
+// one wearing it (and everyone) can see. Not an entity; embedded like
+// COF2Awareness, with Update() called once per think.
+//-----------------------------------------------------------------------------
+class COF2Flashlight
+{
+public:
+	DECLARE_SIMPLE_DATADESC();
+
+	COF2Flashlight();
+	~COF2Flashlight();
+
+	void	Init( CAI_BaseNPC *pOuter )		{ m_pOuter = pOuter; }
+	static void Precache( void );
+
+	// iMode: 0 never, 1 where it is dark, 2 always. bAlerted: looking for someone or
+	// fighting (what it goes by until the client has said how dark it is here).
+	// Returns whether the client is to report the light where the NPC stands
+	// (CAI_BaseNPC::m_bOF2WantsLight).
+	bool	Update( int iMode, bool bAlerted );
+
+	// The light goes out, for good (death, removal)
+	void	Remove( void );
+
+	void	SetAmbientLight( float flLight )	{ m_flAmbientLight = flLight; }
+	bool	IsOn( void ) const					{ return m_bOn; }
+
+	// Can the NPC see that the place it last knew the player to be is empty? Only where
+	// there is light: the room's (as far as it knows: where it stands), or the beam's.
+	bool	IsSpotLit( void ) const;
+
+	// Is this place lit for the one wearing it: by the room it stands in (as far as it
+	// knows), or by the beam?
+	bool	Lights( const Vector &vecPos );
+
+private:
+	void	Set( bool bOn );
+	bool	GetRay( Vector *pOrigin, Vector *pForward );
+	bool	WantsProjected( void );
+	float	Rank( CBasePlayer *pPlayer );
+
+	CAI_BaseNPC	*m_pOuter;
+	bool	m_bOn;
+	float	m_flAmbientLight;	// brightness where it stands, from the client; below 0 until the first report
+	float	m_flOffTime;		// stays on this long after calming down
+	bool	m_bOnSpot;			// the beam is on the place it last knew the player to be
+	EHANDLE	m_hCone;			// the cone of light in the air, of2_lightcone (not saved; made again after a load)
+	EHANDLE	m_hEnd;				// "spotlight_end": marks a light that is not projected (the client makes the pool)
+	EHANDLE	m_hProjected;		// env_projectedtexture, for the few nearest the player
+	EHANDLE	m_hGlow;			// sprite on the side of the head
+};
 
 #endif // OF2_STEALTH_H

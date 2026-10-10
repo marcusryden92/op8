@@ -79,8 +79,14 @@ bool C_OF2ViewModelManhack::PlaceInHand( void )
 	if ( iBone < 0 )
 		return false;
 
+	// The bones it is being drawn with. Not GetBoneTransform: that reads the hitbox bone cache,
+	// which is kept for a tenth of a second and so can be from before the viewmodel was put in
+	// place for this frame (see the Displacer, c_weapon_displacer.cpp).
+	if ( !pViewModel->SetupBones( NULL, -1, BONE_USED_BY_ANYTHING, gpGlobals->curtime ) )
+		return false;
+
 	matrix3x4_t matBone;
-	pViewModel->GetBoneTransform( iBone, matBone );
+	pViewModel->GetCachedBoneMatrix( iBone, matBone );
 
 	Vector vecOffset;
 	QAngle angOffset;

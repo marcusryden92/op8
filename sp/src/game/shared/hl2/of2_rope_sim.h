@@ -16,8 +16,18 @@
 
 #define OF2_ROPE_SIM_MAX_NODES	32
 
-// About this much rope between two points
+// About this much rope between two points, unless of2_rope_spacing says otherwise
 #define OF2_ROPE_SIM_SPACING	16.0f
+
+class ITraceFilter;
+
+// The points of a rope only know about the world one by one, so the straight
+// line from a point lying on a floor to the next one hanging over its edge goes
+// through the corner. This finds that corner: where the two faces the line goes
+// in and out by meet, stood flStandOff off both. pOut is the way from the
+// corner out into the open. False if the line is clear, or it is not one
+// corner that is in the way (a thin plate, two separate things).
+bool OF2_RopeLinkCorner( const Vector &vecFrom, const Vector &vecTo, float flStandOff, unsigned int nMask, ITraceFilter *pFilter, Vector *pCorner, Vector *pOut = NULL );
 
 class COF2RopeSim
 {
@@ -38,6 +48,14 @@ public:
 	// Lower makes it trail more and swing less.
 	void	SetDamping( float flDamping )		{ m_flDamping = flDamping; }
 
+	// More of its speed lost the faster a point moves: divided by one plus this
+	// times the units it moved in a step. Cuts whipping about and leaves a slow sway.
+	void	SetDrag( float flDrag )				{ m_flDrag = flDrag; }
+
+	// Half the rope's thickness: its points rest this far off what they lie on
+	void	SetRadius( float flRadius )			{ m_flRadius = MAX( flRadius, 0.5f ); }
+	float	GetRadius( void ) const				{ return m_flRadius; }
+
 	// The rope paid out or taken in at the root; the points stay where they are
 	void	SetLength( float flLength );
 
@@ -49,6 +67,9 @@ public:
 	// being dragged after the end a step at a time.
 	void	SetEndPin( const Vector &vecEnd )	{ if ( !m_bEndPinned ) m_vecEndPinWas = vecEnd; m_bEndPinned = true; m_vecEndPin = vecEnd; }
 	void	ClearEndPin( void )					{ m_bEndPinned = false; }
+	// How much of that going along there is: 1 all of it (the default), 0 none,
+	// and the points between are only drawn after the ends by the rope itself
+	void	SetCarry( float flCarry )			{ m_flCarry = flCarry; }
 
 	// Moves it on by flTime, its root at vecRoot. vecWind pushes every point.
 	void	Simulate( float flTime, const Vector &vecRoot, const Vector &vecWind );
@@ -56,6 +77,11 @@ public:
 	bool	IsSeeded( void ) const				{ return m_nNodes > 1; }
 	int		GetNodeCount( void ) const			{ return m_nNodes; }
 	const Vector &GetNode( int iNode ) const	{ return m_vecPos[iNode]; }
+	float	GetSegment( void ) const			{ return m_flSegment; }
+
+	// The corner the rope goes over between point iLink and the next, if any
+	// (OF2_RopeLinkCorner, as of the last step)
+	bool	GetLinkCorner( int iLink, Vector *pCorner ) const;
 
 	// How far an end is from where the rope comes nearest it, and how far along
 	// the rope that is from the root
@@ -75,6 +101,11 @@ private:
 	Vector	m_vecEndPin;
 	Vector	m_vecEndPinWas;
 	Vector	m_vecRootWas;
+	float	m_flDrag;
+	float	m_flRadius;
+	float	m_flCarry;
+	bool	m_bCorner[OF2_ROPE_SIM_MAX_NODES];
+	Vector	m_vecCorner[OF2_ROPE_SIM_MAX_NODES];
 };
 
 #endif // OF2_ROPE_SIM_H

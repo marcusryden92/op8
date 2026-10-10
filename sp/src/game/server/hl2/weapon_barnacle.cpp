@@ -42,6 +42,7 @@
 #include "hl_gamemovement.h"
 #include "hl2_player.h"
 #include "hl2/of2_tongue_shared.h"
+#include "hl2/of2_rope_sim.h"
 #include "physics.h"
 #include "vphysics_interface.h"
 #include "movevars_shared.h"
@@ -52,6 +53,8 @@
 #include "npc_BaseZombie.h"
 #include "npc_combine.h"
 #include "physics_prop_ragdoll.h"
+#include "te_effect_dispatch.h"
+#include "of2_stealth.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
@@ -66,6 +69,14 @@
 #define BARNACLE_REEL_SEQUENCE		"slurp"
 // A neck breaking on the tongue, or a headcrab coming off its zombie
 #define BARNACLE_FLINCH_SEQUENCE	"flinch1"
+// The throw is aimed at what the player looks at only if that is further off than this
+#define BARNACLE_AIM_MIN_DIST		96.0f
+// A neck snapping is heard from this far off, however far away it is
+#define BARNACLE_SNAP_SOUND_DIST	48.0f
+// No throw for this long after the weapon comes out
+#define BARNACLE_DEPLOY_DELAY		0.4f	// (as long as it takes to come up: of2_barnacle_equip_time)
+// With no hitbox to go by, the tongue has someone by the head if it landed no lower than this under their eyes
+#define BARNACLE_HEAD_BELOW_EYES	8.0f
 // Reeled up to something too big to kill outright, and biting it
 #define BARNACLE_BITE_SEQUENCE		"attack_player"
 // How often it bites
@@ -135,6 +146,7 @@
 ConVar of2_barnacle_max_length( "of2_barnacle_max_length", "1500", FCVAR_NONE, "Length of the Barnacle's whole tongue. Read when thrown." );
 ConVar of2_barnacle_throw_speed( "of2_barnacle_throw_speed", "1100", FCVAR_NONE, "Speed the Barnacle's tip is thrown at." );
 ConVar of2_barnacle_throw_up( "of2_barnacle_throw_up", "120", FCVAR_NONE, "Upward speed added to the Barnacle's throw." );
+ConVar of2_barnacle_lead_cone( "of2_barnacle_lead_cone", "8", FCVAR_NONE, "Aiming ahead of someone moving, the crosshair is on what is behind them and the Barnacle threw for that distance, over their head. With prey within this many degrees of the crosshair and nearer than what it is on, the throw is for their distance instead. 0 turns it off." );
 ConVar of2_barnacle_throw_slack( "of2_barnacle_throw_slack", "0.01", FCVAR_NONE, "How much more tongue than the tip needs comes out behind it during the throw, as a share. 0 is a dead straight line." );
 ConVar of2_barnacle_tip_weight( "of2_barnacle_tip_weight", "150", FCVAR_NONE, "The Barnacle's tip weighs this many times one point of its tongue. Heavier, the tongue trailing behind slows the throw less." );
 ConVar of2_barnacle_rope_drag( "of2_barnacle_rope_drag", "4", FCVAR_NONE, "Air drag on the Barnacle's tongue (not its tip), so it hangs back in an arc and settles instead of whipping about." );
@@ -157,18 +169,25 @@ ConVar of2_barnacle_snag_dist( "of2_barnacle_snag_dist", "32", FCVAR_NONE, "Some
 ConVar of2_barnacle_snag_time( "of2_barnacle_snag_time", "0.5", FCVAR_NONE, "Something that has been slipping off the Barnacle's tongue for this long is let go." );
 ConVar of2_barnacle_sag( "of2_barnacle_sag", "0.1", FCVAR_NONE, "How much the weight of what the Barnacle's tongue carries pulls the tongue down there (per unit of mass)." );
 ConVar of2_barnacle_spacing( "of2_barnacle_spacing", "20", FCVAR_NONE, "The Barnacle's tongue is simulated as a point about every this much of its length (up to 80 points), so it is as stiff and hangs the same way whether it is short or long. Smaller is suppler." );
+ConVar of2_barnacle_corners( "of2_barnacle_corners", "1", FCVAR_NONE, "Where the straight line between two points of the Barnacle's tongue goes through a corner (one on a floor, the next over its edge), the two are held to each other by the way round the corner. 0: straight through it, as before. (The drawing has its own switch, of2_rope_corners.)" );
 ConVar of2_barnacle_drape( "of2_barnacle_drape", "1", FCVAR_NONE, "The length of the Barnacle's tongue lies on and drapes over loose physics objects, as it does over the world. 0: only over the world." );
 ConVar of2_barnacle_slide_speed( "of2_barnacle_slide_speed", "120", FCVAR_NONE, "Where the Barnacle's tongue goes over an edge it slides along the edge, towards where it pulls on it evenly. This is its speed at the hardest pull. 0: it stays where it first touched." );
 ConVar of2_barnacle_slide_friction( "of2_barnacle_slide_friction", "0.35", FCVAR_NONE, "How sticky the Barnacle's tongue is on an edge: how lopsided the pull has to be before it slides along it (0 always, 1 only when dragged almost straight along it). A climb rope has its own, lower." );
 ConVar of2_barnacle_prey( "of2_barnacle_prey", "1", FCVAR_NONE, "The Barnacle's tongue takes hold of living things: headcrabs (reeled in and eaten), the headcrab on a zombie, and hostile people. 0: it passes through them all." );
 ConVar of2_barnacle_eat_health( "of2_barnacle_eat_health", "10", FCVAR_NONE, "Health the player gets when the Barnacle eats a headcrab." );
+ConVar of2_barnacle_flick_time( "of2_barnacle_flick_time", "1.37", FCVAR_NONE, "How long the whip of the Barnacle in the hand takes when it snaps a neck, start to finish. The neck goes a little over two fifths of the way through, with the mouth at the top." );
+ConVar of2_barnacle_alert_delay( "of2_barnacle_alert_delay", "1", FCVAR_NONE, "How long after the Barnacle's tongue lands on someone they take to notice, in seconds: the time there is to break their neck unnoticed." );
 ConVar of2_barnacle_strain_damage( "of2_barnacle_strain_damage", "30", FCVAR_NONE, "Damage a second the Barnacle's tongue does, pulled tight, to someone it can't kill outright: an elite soldier, or anyone it has by something other than the head or chest." );
 ConVar of2_barnacle_corpses( "of2_barnacle_corpses", "1", FCVAR_NONE, "While the player has the Barnacle, what dies leaves a body the tongue can take hold of (a ragdoll on the server, as the gravity gun's charged form makes them). 0: bodies are as in Half-Life 2, only there for the eye." );
-ConVar of2_barnacle_corpse_speed( "of2_barnacle_corpse_speed", "0.35", FCVAR_NONE, "With a body on its tongue the Barnacle reels and pulls at this share of its usual speed." );
+ConVar of2_barnacle_corpse_speed( "of2_barnacle_corpse_speed", "0.5", FCVAR_NONE, "With a body on its tongue the Barnacle reels and pulls at this share of its usual speed." );
 ConVar of2_barnacle_corpse_mass( "of2_barnacle_corpse_mass", "250", FCVAR_NONE, "Heaviest body the Barnacle pulls in. A body is pulled whatever of2_barnacle_anchor_mass says, up to this; a heavier one holds the player." );
+ConVar of2_barnacle_corpse_heft( "of2_barnacle_corpse_heft", "4", FCVAR_NONE, "The Barnacle's tongue has a body by one of its parts, which weighs a few kilos, and pulled that part only as hard as it takes to move a few kilos: too little to bring the rest of the body up over an edge. The part is pulled as if it weighed this many times more. 1 is as it was; too high and the body is flung about." );
 ConVar of2_barnacle_bite_damage( "of2_barnacle_bite_damage", "40", FCVAR_NONE, "Damage a second the Barnacle does to an enemy too big for its tongue to kill (an antlion guard), once the player has reeled themselves up to it and goes on reeling." );
 ConVar of2_barnacle_bite_range( "of2_barnacle_bite_range", "120", FCVAR_NONE, "The Barnacle bites such an enemy once there is no more tongue than this between them. The tongue has hold of a part of its body, which the player can't get right up to." );
 ConVar of2_barnacle_auto_release( "of2_barnacle_auto_release", "1", FCVAR_NONE, "The Barnacle takes its tongue back by itself once there is nothing left to reel: the player stands on the ground as near as the tongue gets them, or what it holds has been pulled all the way in." );
+ConVar of2_barnacle_edge_haul( "of2_barnacle_edge_haul", "64", FCVAR_NONE, "Something on the Barnacle's tip that is pulled up to an edge the tongue goes over is, from this close to the edge, pulled towards a spot out past it instead, so it comes over the edge and is not jammed under it. 0 turns it off." );
+ConVar of2_barnacle_edge_clear( "of2_barnacle_edge_clear", "24", FCVAR_NONE, "How far out from an edge, and on past it, that spot is when what is pulled has reached the edge." );
+ConVar of2_barnacle_catch( "of2_barnacle_catch", "1", FCVAR_NONE, "A loose tongue (nothing on its tip) that lies over this many edges or more holds the player's weight there when they come off the ground: it sticks to the edge nearest its tip, and what is past that hangs on. 0: only a tip that has stuck holds them." );
 ConVar of2_barnacle_debug( "of2_barnacle_debug", "0", FCVAR_NONE, "Draw the Barnacle's tongue as debug overlays: its line and bends, its points, and what it holds." );
 
 static const char *s_pTongueContext = "BarnacleTongueThink";
@@ -676,6 +695,22 @@ void CBarnacleRope::ApplyConstraints( CSimplePhysics::CNode *pNodes, int nNodes 
 	int nPasses = m_bFeeding ? 0 : BARNACLE_ROPE_ITERATIONS;
 	pNodes[0].m_vPos = m_vecStart;
 
+	// The points only know about the world one by one. With one lying on a floor
+	// and the next hanging over its edge, the straight line between them goes
+	// through the corner, and held to each other along it they were pulled into
+	// the wall and up to the lip. Where that is so, the tongue between the two
+	// is the way out to the corner and on from it (OF2_RopeLinkCorner), and each
+	// is drawn towards the corner. Looked for from where the points were a tick
+	// ago, which is clear of things. Nothing changes for a link with a clear line.
+	CTraceFilterTongueDrape filter( m_pDrapeIgnore, m_nDrapeIgnore, of2_barnacle_drape.GetBool() );
+	bool bCorner[OF2_TONGUE_NODES];
+	Vector vecCorner[OF2_TONGUE_NODES];
+	bool bCorners = m_bCollide && nPasses > 0 && of2_barnacle_corners.GetBool();
+	for ( int i = 0; i < iTip; i++ )
+	{
+		bCorner[i] = bCorners && OF2_RopeLinkCorner( pNodes[i].m_vPrevPos, pNodes[i + 1].m_vPrevPos, BARNACLE_TONGUE_WIDTH * 0.5f, MASK_SOLID, &filter, &vecCorner[i] );
+	}
+
 	// Neighbours no further apart than the tongue between them. Slack is fine.
 	// Each gives way by its share: a held point not at all, one with something
 	// heavy on it less than a bare one.
@@ -689,14 +724,29 @@ void CBarnacleRope::ApplyConstraints( CSimplePhysics::CNode *pNodes, int nNodes 
 
 		for ( int i = 0; i < iTip; i++ )
 		{
-			Vector vecLink = pNodes[i + 1].m_vPos - pNodes[i].m_vPos;
-			float flLink = vecLink.Length();
-			if ( flLink <= m_flSegment || flLink < 0.001f )
-				continue;
-
 			float flNear = ( i == 0 ) ? 0.0f : m_flInvMass[i];
 			float flFar = ( i + 1 == iTip && m_bTipPinned ) ? 0.0f : m_flInvMass[i + 1];
 			if ( flNear + flFar <= 0.0f )
+				continue;
+
+			if ( bCorner[i] )
+			{
+				Vector vecToNear = vecCorner[i] - pNodes[i].m_vPos;
+				Vector vecToFar = vecCorner[i] - pNodes[i + 1].m_vPos;
+				float flNearWay = VectorNormalize( vecToNear );
+				float flFarWay = VectorNormalize( vecToFar );
+				float flOver = flNearWay + flFarWay - m_flSegment;
+				if ( flOver <= 0.0f )
+					continue;
+
+				pNodes[i].m_vPos += vecToNear * MIN( flOver * flNear / ( flNear + flFar ), flNearWay );
+				pNodes[i + 1].m_vPos += vecToFar * MIN( flOver * flFar / ( flNear + flFar ), flFarWay );
+				continue;
+			}
+
+			Vector vecLink = pNodes[i + 1].m_vPos - pNodes[i].m_vPos;
+			float flLink = vecLink.Length();
+			if ( flLink <= m_flSegment || flLink < 0.001f )
 				continue;
 
 			Vector vecFix = vecLink * ( ( flLink - m_flSegment ) / flLink );
@@ -896,7 +946,6 @@ void CBarnacleRope::ApplyConstraints( CSimplePhysics::CNode *pNodes, int nNodes 
 	// comes last, so a tongue pulled tight over a crate is drawn going over it
 	// even though the line it pulls along (the tether, which only bends around
 	// the world and static props) runs straight through.
-	CTraceFilterTongueDrape filter( m_pDrapeIgnore, m_nDrapeIgnore, of2_barnacle_drape.GetBool() );
 	int iLast = ( bTipFree && !m_bSticky ) ? iTip : iTip - 1;
 	for ( int i = 1; i <= iLast; i++ )
 	{
@@ -1040,6 +1089,7 @@ private:
 	// The tip
 	bool	GetTipPin( Vector *pPin );
 	void	StickTip( CHL2_Player *pPlayer, const trace_t &tr );
+	bool	CatchOnEdge( CHL2_Player *pPlayer );
 	void	FreeTip( void );
 	void	CheckTip( void );
 
@@ -1052,6 +1102,7 @@ private:
 	void	EatCarried( CBasePlayer *pOwner );
 	void	UpdatePrey( CHL2_Player *pPlayer );
 	void	BitePrey( CHL2_Player *pPlayer );
+	void	WindUpSnap( void );
 	void	SnapPrey( CHL2_Player *pPlayer, CAI_BaseNPC *pNPC );
 	void	RipHeadcrab( CHL2_Player *pPlayer, CAI_BaseNPC *pNPC );
 
@@ -1069,6 +1120,7 @@ private:
 	// What the tongue holds
 	float	GetGrip( float flAlong ) const;
 	float	GetHaulScale( void ) const;
+	bool	HoldsCorpse( void ) const;
 	void	HoldObject( BarnacleHold_t &hold );
 	void	ReleaseHold( BarnacleHold_t &hold );
 	bool	IsSlipping( BarnacleHold_t &hold, float flDist, float flTime );
@@ -1098,6 +1150,11 @@ private:
 	float		m_flSlack;
 	// When the throw ended
 	float		m_flSlackTime;
+	// The tongue has stuck where it lies over an edge, not by its tip: the player
+	// hangs from there (TIP_ANCHORED, m_vecTipFixed is that place) and the tip
+	// stays loose, with m_flTail of tongue past the edge
+	bool		m_bCaught;
+	float		m_flTail;
 
 	int			m_iTip;
 	// What the tip is on, if it is not the world, and where on it (m_TipHold.vecLocal)
@@ -1112,9 +1169,14 @@ private:
 	// whether pulling tight kills them at once, and when it next hurts them if not
 	int			m_iPreyBone;
 	bool		m_bPreySnap;
+	// ...whether it is the head it has them by (nothing else gets hurt), and when they notice
+	bool		m_bPreyHead;
+	float		m_flPreyAlertTime;
 	// ...or, if it is a zombie, takes its headcrab off instead
 	bool		m_bPreyZombie;
 	float		m_flNextStrain;
+	// When the neck in its grip goes (WindUpSnap); 0 while none is about to
+	float		m_flSnapTime;
 	// The tip is on an enemy too big to kill outright (TIP_ANCHORED, by
 	// m_iPreyBone); m_bBiting while the barnacle is at it
 	bool		m_bTipBig;
@@ -1204,6 +1266,8 @@ CWeaponBarnacle::CWeaponBarnacle()
 	m_bWasFeeding = false;
 	m_flSlack = 0.0f;
 	m_flSlackTime = 0.0f;
+	m_bCaught = false;
+	m_flTail = 0.0f;
 	m_iTip = TIP_FREE;
 	m_bTipOnEntity = false;
 	m_vecTipFixed.Init();
@@ -1211,7 +1275,10 @@ CWeaponBarnacle::CWeaponBarnacle()
 	m_iPreyBone = -1;
 	m_bPreySnap = false;
 	m_bPreyZombie = false;
+	m_bPreyHead = false;
+	m_flPreyAlertTime = 0.0f;
 	m_flNextStrain = 0.0f;
+	m_flSnapTime = 0.0f;
 	m_bTipBig = false;
 	m_bBiting = false;
 	m_flLeash = 0.0f;
@@ -1247,6 +1314,7 @@ void CWeaponBarnacle::Precache( void )
 	PrecacheScriptSound( "Weapon_Barnacle.Stick" );
 	PrecacheScriptSound( "Weapon_Barnacle.Retract" );
 	PrecacheScriptSound( "NPC_Barnacle.BreakNeck" );
+	PrecacheScriptSound( "Weapon_Barnacle.BreakNeck" );
 	PrecacheScriptSound( "NPC_Barnacle.FinalBite" );
 
 	BaseClass::Precache();
@@ -1321,6 +1389,12 @@ void CWeaponBarnacle::PlayReaction( const char *pszSequence )
 bool CWeaponBarnacle::Deploy( void )
 {
 	bool bDeployed = BaseClass::Deploy();
+
+	// Not thrown by the click that brought it out. (Throwing something carried by hand puts the
+	// weapon away and brings it back out on that very click, and the tongue went with the
+	// thing thrown: the user saw that.)
+	m_bAttackReleased = false;
+	m_flNextPrimaryAttack = MAX( m_flNextPrimaryAttack.Get(), gpGlobals->curtime + BARNACLE_DEPLOY_DELAY );
 	PlaySequence( BARNACLE_IDLE_SEQUENCE );
 	return bDeployed;
 }
@@ -1423,13 +1497,86 @@ void CWeaponBarnacle::Throw( void )
 	pOwner->EyeVectors( &vecForward );
 
 	Vector vecMouth = GetMouthPos( pOwner );
-	Vector vecVelocity = vecForward * of2_barnacle_throw_speed.GetFloat() + pOwner->GetAbsVelocity();
-	vecVelocity.z += of2_barnacle_throw_up.GetFloat();
+
+	// The mouth is well off to the side of the eyes (it is where the model's
+	// is), and the throw is a lob: it leaves with some speed upwards and then
+	// falls. Thrown straight ahead it went past what the player aimed at, and
+	// thrown straight at it, over it (the user: over a metrocop's head). So
+	// when they look at something in reach, it is thrown so that the tip's arc
+	// goes through that very spot. People are found by their hitboxes: a head
+	// can be outside the box an NPC collides by.
+	float flSpeed = of2_barnacle_throw_speed.GetFloat();
+	Vector vecExtra( 0.0f, 0.0f, of2_barnacle_throw_up.GetFloat() );
+
+	trace_t trAim;
+	UTIL_TraceLine( pOwner->EyePosition(), pOwner->EyePosition() + vecForward * m_flMaxLength, MASK_SHOT, pOwner, COLLISION_GROUP_NONE, &trAim );
+	// Leading someone who runs across, the crosshair is on the wall behind them, and the arc made
+	// for that distance is still over their head where they are (the user saw that). So with
+	// prey close to the crosshair and nearer than what it is on, the throw is for the spot on the
+	// line of sight that is as far away as they are: where the player aims, at their distance.
+	float flCone = of2_barnacle_lead_cone.GetFloat();
+	if ( flCone > 0.0f && BarnaclePreyKind( trAim.m_pEnt, pOwner ) == PREY_NONE )
+	{
+		Vector vecEye = pOwner->EyePosition();
+		float flBest = cos( DEG2RAD( flCone ) );
+		float flNear = trAim.endpos.DistTo( vecEye );
+		float flAt = -1.0f;
+
+		CAI_BaseNPC **ppAIs = g_AI_Manager.AccessAIs();
+		for ( int i = 0; i < g_AI_Manager.NumAIs(); i++ )
+		{
+			CAI_BaseNPC *pNPC = ppAIs[i];
+			if ( pNPC == NULL || !pNPC->IsAlive() || BarnaclePreyKind( pNPC, pOwner ) == PREY_NONE )
+				continue;
+
+			Vector vecTo = pNPC->EyePosition() - vecEye;
+			float flFar = VectorNormalize( vecTo );
+			float flDot = DotProduct( vecTo, vecForward );
+			if ( flFar < BARNACLE_AIM_MIN_DIST || flFar * flDot >= flNear || flDot < flBest || !pOwner->FVisible( pNPC, MASK_SOLID_BRUSHONLY ) )
+				continue;
+
+			flBest = flDot;
+			flAt = flFar * flDot;
+		}
+
+		if ( flAt > 0.0f )
+		{
+			trAim.endpos = vecEye + vecForward * flAt;
+			trAim.fraction = flAt / m_flMaxLength;
+		}
+	}
+
+	if ( trAim.endpos.DistTo( pOwner->EyePosition() ) > BARNACLE_AIM_MIN_DIST && flSpeed > 1.0f )
+	{
+		Vector vecAim = trAim.endpos - vecMouth;
+		if ( trAim.fraction < 1.0f )
+		{
+			// Where to throw for the arc to come down on it: found by how long
+			// the tip takes to get there, which the answer changes a little
+			float flTime = vecAim.Length() / flSpeed;
+			for ( int i = 0; i < 4; i++ )
+			{
+				vecAim = trAim.endpos - vecMouth - vecExtra * flTime;
+				vecAim.z += 0.5f * GetCurrentGravity() * flTime * flTime;
+				flTime = vecAim.Length() / flSpeed;
+			}
+		}
+
+		if ( VectorNormalize( vecAim ) > 1.0f )
+		{
+			vecForward = vecAim;
+		}
+	}
+
+	Vector vecVelocity = vecForward * flSpeed + pOwner->GetAbsVelocity();
+	vecVelocity += vecExtra;
 
 	m_Rope.Seed( vecMouth, vecVelocity );
 	m_vecLaunchVelocity = vecVelocity;
 	m_bWasFeeding = false;
 	m_flSlack = 0.0f;
+	m_bCaught = false;
+	m_flTail = 0.0f;
 
 	m_Tether.Init( vecMouth, vecMouth, 1.0f );
 	m_Tether.SetPlayerEnd( TETHER_START );
@@ -1492,6 +1639,8 @@ void CWeaponBarnacle::ResetTongue( void )
 	m_bTipOnEntity = false;
 	m_bTipBig = false;
 	m_bBiting = false;
+	m_bCaught = false;
+	m_flTail = 0.0f;
 	m_bTongueOut = false;
 	m_bPayingOut = false;
 	m_bRetracting = false;
@@ -1525,6 +1674,8 @@ void CWeaponBarnacle::StartRetract( void )
 	m_bTipBig = false;
 	m_bBiting = false;
 	m_bPayingOut = false;
+	m_bCaught = false;
+	m_flTail = 0.0f;
 
 	// From what is out, not from what could have been
 	float flOut = MIN( m_Tether.GetTotalLength(), m_Tether.GetPathLength() );
@@ -1678,10 +1829,11 @@ bool CWeaponBarnacle::StickToNPC( CHL2_Player *pPlayer, CAI_BaseNPC *pNPC, const
 	int iGroup = HITGROUP_GENERIC;
 	Vector vecLocal;
 	bool bBody = NearestHitbox( pNPC, tr.endpos, &iBone, &iGroup, &vecLocal );
-	bool bUpper = bBody ? ( iGroup == HITGROUP_HEAD || iGroup == HITGROUP_CHEST ) : ( tr.endpos.z > pNPC->WorldSpaceCenter().z );
+	bool bHead = bBody ? ( iGroup == HITGROUP_HEAD ) : ( tr.endpos.z > pNPC->EyePosition().z - BARNACLE_HEAD_BELOW_EYES );
 
-	// A zombie only from up where the headcrab sits
-	if ( iKind == PREY_ZOMBIE && !bUpper )
+	// A zombie only by the head, where the headcrab sits (the chest counted too, until the user
+	// asked for the head alone, as for people)
+	if ( iKind == PREY_ZOMBIE && !bHead )
 		return false;
 
 	ClearHold( m_TipHold );
@@ -1700,22 +1852,30 @@ bool CWeaponBarnacle::StickToNPC( CHL2_Player *pPlayer, CAI_BaseNPC *pNPC, const
 		VectorITransform( tr.endpos, pNPC->EntityToWorldTransform(), m_TipHold.vecLocal );
 	}
 
-	// By the head or chest, pulling tight breaks their neck. An elite soldier's
-	// doesn't break; they, and anyone held lower down, are hurt instead.
+	// By the head, pulling tight breaks their neck. An elite soldier's doesn't
+	// break; held by the head they are hurt instead. Held anywhere else, nobody
+	// is hurt at all: the tongue only has hold of them. (The user asked for that;
+	// it used to break a neck from the chest too, and hurt from anywhere.)
 	CNPC_Combine *pSoldier = dynamic_cast<CNPC_Combine *>( pNPC );
-	m_bPreySnap = bUpper && !( pSoldier && pSoldier->IsElite() );
+	m_bPreyHead = bHead;
+	m_bPreySnap = bHead && !( pSoldier && pSoldier->IsElite() );
 	m_bPreyZombie = ( iKind == PREY_ZOMBIE );
 	m_flNextStrain = 0.0f;
+	m_flSnapTime = 0.0f;
 	m_bTipBig = ( iKind == PREY_BIG );
 
 	m_bPayingOut = false;
 	EmitSound( "Weapon_Barnacle.Stick" );
 
-	// They know where that came from
-	pNPC->UpdateEnemyMemory( pPlayer, pPlayer->GetAbsOrigin() );
+	// They know where that came from: something big at once, a person only after
+	// a moment (UpdatePrey), which is the time there is to break their neck
+	// without anyone the wiser (the user asked for a second)
+	m_flPreyAlertTime = gpGlobals->curtime + of2_barnacle_alert_delay.GetFloat();
 
 	if ( m_bTipBig )
 	{
+		pNPC->UpdateEnemyMemory( pPlayer, pPlayer->GetAbsOrigin() );
+		m_flPreyAlertTime = 0.0f;
 		m_bPreySnap = false;
 		m_iTip = TIP_ANCHORED;
 
@@ -1853,6 +2013,24 @@ void CWeaponBarnacle::UpdatePrey( CHL2_Player *pPlayer )
 		return;
 	}
 
+	// They have felt it by now, unless their neck is already on its way
+	if ( m_flPreyAlertTime != 0.0f && m_flSnapTime == 0.0f && gpGlobals->curtime >= m_flPreyAlertTime )
+	{
+		m_flPreyAlertTime = 0.0f;
+		pNPC->UpdateEnemyMemory( pPlayer, pPlayer->GetAbsOrigin() );
+	}
+
+	// The barnacle is already whipping: the neck goes when its mouth is at the
+	// top, whatever the player does in between
+	if ( m_flSnapTime != 0.0f )
+	{
+		if ( gpGlobals->curtime >= m_flSnapTime )
+		{
+			SnapPrey( pPlayer, pNPC );
+		}
+		return;
+	}
+
 	if ( !m_bReeling )
 	{
 		if ( flPath > flTotal )
@@ -1874,9 +2052,13 @@ void CWeaponBarnacle::UpdatePrey( CHL2_Player *pPlayer )
 
 	if ( m_bPreySnap )
 	{
-		SnapPrey( pPlayer, pNPC );
+		WindUpSnap();
 		return;
 	}
+
+	// Only the head is worth pulling at
+	if ( !m_bPreyHead )
+		return;
 
 	if ( gpGlobals->curtime < m_flNextStrain )
 		return;
@@ -1887,7 +2069,7 @@ void CWeaponBarnacle::UpdatePrey( CHL2_Player *pPlayer )
 	if ( pNPC->GetHealth() <= flDamage )
 	{
 		// That would finish them: the same end as the others
-		SnapPrey( pPlayer, pNPC );
+		WindUpSnap();
 		return;
 	}
 
@@ -1985,6 +2167,26 @@ void CWeaponBarnacle::RipHeadcrab( CHL2_Player *pPlayer, CAI_BaseNPC *pNPC )
 }
 
 //-----------------------------------------------------------------------------
+// A neck is about to go: the barnacle in the hand whips first (client:
+// c_of2_tongue.cpp), and the neck snaps as its mouth gets to the top
+// (UpdatePrey). The user asked for the snap to fall on that moment.
+//-----------------------------------------------------------------------------
+void CWeaponBarnacle::WindUpSnap( void )
+{
+	CBasePlayer *pOwner = ToBasePlayer( GetOwner() );
+	if ( pOwner == NULL || m_flSnapTime != 0.0f )
+		return;
+
+	float flTime = MAX( of2_barnacle_flick_time.GetFloat(), 0.0f );
+	m_flSnapTime = gpGlobals->curtime + flTime * OF2_BARNACLE_FLICK_SNAP;
+
+	CEffectData flick;
+	flick.m_vOrigin = pOwner->EyePosition();
+	flick.m_flScale = flTime;
+	DispatchEffect( "OF2BarnacleFlick", flick );
+}
+
+//-----------------------------------------------------------------------------
 // The neck goes. What is left is a ragdoll, made here rather than left to
 // their dying so that the tongue can keep hold of it: from now on it is
 // something on the tip like any other, and comes in when reeled.
@@ -2000,9 +2202,25 @@ void CWeaponBarnacle::SnapPrey( CHL2_Player *pPlayer, CAI_BaseNPC *pNPC )
 
 	CBaseEntity *pRagdoll = CreateServerRagdoll( pNPC, 0, info, COLLISION_GROUP_INTERACTIVE_DEBRIS, true );
 
-	pNPC->EmitSound( "NPC_Barnacle.BreakNeck" );
+	m_flSnapTime = 0.0f;
+
+	// The crack comes from the way the neck is, but always from the same short
+	// distance, so it is as loud from a tongue's length away as from up close
+	// (the user asked: played where the neck is, it was too quiet to hear)
+	Vector vecEar = pPlayer->EyePosition();
+	Vector vecToNeck = vecPin - vecEar;
+	float flAway = VectorNormalize( vecToNeck );
+	Vector vecCrack = vecEar + vecToNeck * MIN( flAway, BARNACLE_SNAP_SOUND_DIST );
+
+	CPASAttenuationFilter filter( vecCrack, "Weapon_Barnacle.BreakNeck" );
+	CBaseEntity::EmitSound( filter, SOUND_FROM_WORLD, "Weapon_Barnacle.BreakNeck", &vecCrack );
 	PlayReaction( BARNACLE_FLINCH_SEQUENCE );
+	// Stealth: a squadmate who sees this knows where the tongue comes from, and the
+	// body others may find is the ragdoll made above
+	OF2_KillLeadsTo( pPlayer );
 	pNPC->TakeDamage( info );
+	OF2_KillLeadsTo( NULL );
+	OF2_BodyRagdoll( pNPC, pRagdoll );
 	if ( pNPC->IsAlive() )
 	{
 		// (something made them shrug it off; they don't get to keep walking next to their own body)
@@ -2061,6 +2279,8 @@ void CWeaponBarnacle::FreeTip( void )
 	m_iTip = TIP_FREE;
 	m_bTipOnEntity = false;
 	m_bTipBig = false;
+	m_bCaught = false;
+	m_flTail = 0.0f;
 	m_iPreyBone = -1;
 
 	// Not straight back onto what it just came off
@@ -2103,6 +2323,50 @@ void CWeaponBarnacle::CheckTip( void )
 	{
 		FreeTip();
 	}
+}
+
+//-----------------------------------------------------------------------------
+// A loose tongue lying over an edge takes the player's weight: it is sticky
+// all along, not only at its tip. (The user: thrown over a ledge with the
+// tip left dangling beyond it, it only held them once reeling had dragged the
+// tip against something.) The player hangs from the edge nearest the tip, as
+// from a tip stuck there. The tip itself stays loose and what is past the
+// edge hangs on from it.
+//-----------------------------------------------------------------------------
+bool CWeaponBarnacle::CatchOnEdge( CHL2_Player *pPlayer )
+{
+	int nEdges = of2_barnacle_catch.GetInt();
+	int nPivots = m_Tether.GetPivotCount();
+	if ( nEdges <= 0 || nPivots < nEdges )
+		return false;
+
+	if ( m_iTip != TIP_FREE || m_bPayingOut || m_bRetracting || m_hCarried != NULL || gpGlobals->curtime < m_flTipStickTime )
+		return false;
+
+	// Only their weight does it: standing, the tongue is theirs to drag about
+	if ( pPlayer->GetGroundEntity() != NULL || pPlayer->IsOnTether() )
+		return false;
+
+	Vector vecCatch = m_Tether.GetPoint( nPivots );
+	m_Tether.TruncatePivots( nPivots - 1 );
+
+	ClearHold( m_TipHold );
+	m_bTipBig = false;
+	m_bTipOnEntity = false;
+	m_vecTipFixed = vecCatch;
+	m_iTip = TIP_ANCHORED;
+	m_bCaught = true;
+
+	Anchor( pPlayer, vecCatch );
+
+	// The rest of what lies out is past the edge, and stays as it is
+	m_flTail = MAX( m_Rope.GetLength() - m_Tether.GetTotalLength(), 0.0f );
+	m_flSlack = 0.0f;
+	m_flLeashMax = MAX( m_flMaxLength - m_flTail, m_Tether.GetTotalLength() );
+	m_flLeash = m_flLeashMax;
+
+	EmitSound( "Weapon_Barnacle.Stick" );
+	return true;
 }
 
 //-----------------------------------------------------------------------------
@@ -2293,7 +2557,9 @@ bool CWeaponBarnacle::UpdateLoose( CBasePlayer *pOwner, const Vector &vecMouth, 
 			// back by itself, as it does when the player has reeled themselves
 			// all the way (the user asked for the same here). Something on the
 			// tip that is still on its way in is waited for.
-			if ( of2_barnacle_auto_release.GetBool() &&
+			// Not a body: that stays on the tongue until the player lets go (the
+			// user asked: there is to be a way to hide bodies).
+			if ( of2_barnacle_auto_release.GetBool() && !HoldsCorpse() &&
 				 ( m_iTip != TIP_PAYLOAD || flPath <= BARNACLE_MIN_LENGTH + BARNACLE_RELEASE_DIST ) )
 			{
 				StartRetract();
@@ -2364,7 +2630,7 @@ float CWeaponBarnacle::GetGrip( float flAlong ) const
 // A body comes in slower than anything else: at the usual speed it arrived at
 // the barnacle as a missile (of2_barnacle_corpse_speed, which the user asked for)
 //-----------------------------------------------------------------------------
-float CWeaponBarnacle::GetHaulScale( void ) const
+bool CWeaponBarnacle::HoldsCorpse( void ) const
 {
 	bool bCorpse = ( m_iTip == TIP_PAYLOAD && IsCorpse( m_TipHold.hEntity ) );
 	for ( int i = 0; i < m_nJunk && !bCorpse; i++ )
@@ -2372,7 +2638,12 @@ float CWeaponBarnacle::GetHaulScale( void ) const
 		bCorpse = IsCorpse( m_Junk[i].hEntity );
 	}
 
-	return bCorpse ? clamp( of2_barnacle_corpse_speed.GetFloat(), 0.05f, 1.0f ) : 1.0f;
+	return bCorpse;
+}
+
+float CWeaponBarnacle::GetHaulScale( void ) const
+{
+	return HoldsCorpse() ? clamp( of2_barnacle_corpse_speed.GetFloat(), 0.05f, 1.0f ) : 1.0f;
 }
 
 //-----------------------------------------------------------------------------
@@ -2455,12 +2726,44 @@ void CWeaponBarnacle::UpdateHolds( CBasePlayer *pOwner )
 		hold.flGain = of2_barnacle_pull.GetFloat();
 		hold.flMaxSpeed = of2_barnacle_pull_max_speed.GetFloat() * GetHaulScale();
 		hold.flMaxForce = GetGrip( 0.0f ) * flAccel;
+		// Pulled straight at an edge the tongue goes over, a body ends up jammed
+		// under the lip, falls behind and is let go (the user: it drops at the
+		// edge). So as it gets near, it is pulled towards a spot out from the
+		// corner and on along the tongue instead, further the nearer it is, and
+		// so comes up over the edge.
+		int nPivots = m_Tether.GetPivotCount();
+		float flHaul = of2_barnacle_edge_haul.GetFloat();
+		if ( nPivots > 0 && flHaul > 0.0f )
+		{
+			Vector vecAttach;
+			hold.pPhysics->LocalToWorld( &vecAttach, hold.vecLocal );
+
+			Vector vecEdge = hold.vecPull;
+			Vector vecOn = m_Tether.GetPoint( nPivots - 1 ) - vecEdge;
+			Vector vecBack = vecAttach - vecEdge;
+			VectorNormalize( vecOn );
+			float flTo = VectorNormalize( vecBack );
+			if ( flTo < flHaul )
+			{
+				// (the corner is inside the turn the tongue makes there)
+				Vector vecOut = -( vecOn + vecBack );
+				if ( VectorNormalize( vecOut ) < 0.01f )
+				{
+					vecOut.Init( 0.0f, 0.0f, 1.0f );
+				}
+
+				float flShare = 1.0f - flTo / flHaul;
+				hold.vecPull = vecEdge + ( vecOut + vecOn ) * ( of2_barnacle_edge_clear.GetFloat() * flShare );
+			}
+		}
+
 		hold.bPullSet = true;
 
 		// (an object that has gone to sleep is not simulated)
 		hold.pPhysics->Wake();
 
-		if ( IsSlipping( hold, flSnagDist * BARNACLE_TIP_SNAG_DIST, flSnagTime * BARNACLE_TIP_SNAG_TIME ) )
+		// A body is not let go for falling behind: only by the player
+		if ( !IsCorpse( hold.hEntity ) && IsSlipping( hold, flSnagDist * BARNACLE_TIP_SNAG_DIST, flSnagTime * BARNACLE_TIP_SNAG_TIME ) )
 		{
 			FreeTip();
 		}
@@ -2719,6 +3022,11 @@ void CWeaponBarnacle::UpdateTongue( void )
 	// The edges the straight way to the tip goes over, from the tip's end back.
 	// The client draws the tongue round the ones it lies against.
 	int nBends = 0;
+	if ( m_bCaught )
+	{
+		// (the edge it has stuck to is one of them)
+		pTongue->m_vecBends.Set( nBends++, m_vecTipFixed );
+	}
 	for ( int j = m_Tether.GetPivotCount() - 1; j >= 0 && nBends < OF2_TONGUE_MAX_BENDS; j-- )
 	{
 		pTongue->m_vecBends.Set( nBends++, m_Tether.GetPoint( j + 1 ) );
@@ -2850,6 +3158,10 @@ void CWeaponBarnacle::TongueThink( void )
 		}
 
 		flLength += m_flSlack;
+		if ( m_bCaught )
+		{
+			flLength += m_flTail;
+		}
 	}
 
 	m_bWasFeeding = bFeeding;
@@ -2881,7 +3193,13 @@ void CWeaponBarnacle::TongueThink( void )
 		m_Rope.m_vecVia[i] = m_Tether.GetPoint( i + 1 );
 	}
 
-	m_Rope.Step( vecStart, flLength, bPinned ? &vecPin : NULL );
+	// Stuck to an edge: the tongue goes over that too, and its tip is loose
+	if ( m_bCaught && m_Rope.m_nVia < OF2_TETHER_MAX_PIVOTS )
+	{
+		m_Rope.m_vecVia[m_Rope.m_nVia++] = m_vecTipFixed;
+	}
+
+	m_Rope.Step( vecStart, flLength, ( bPinned && !m_bCaught ) ? &vecPin : NULL );
 
 	if ( of2_barnacle_debug.GetBool() && bPinned && gpGlobals->curtime < m_flSlackTime + 1.5f )
 	{
@@ -2911,6 +3229,24 @@ void CWeaponBarnacle::TongueThink( void )
 		StickTip( pPlayer, tr );
 		bPinned = GetTipPin( &vecPin );
 		bJustAnchored = ( m_iTip == TIP_ANCHORED );
+
+		// The tongue is now measured by the way to where the tip stuck, and
+		// what lies out can be far longer than that: thrown to its full length,
+		// the tip was held back and fell, and came down nearer by. All of that
+		// is slack too, or the tongue is put on the straight line in one tick
+		// (the user: it snapped the moment the tip touched the ground). It
+		// stays as it lies and sinks by its own weight.
+		if ( bPinned )
+		{
+			m_flSlack = MAX( m_Rope.GetLength() - m_Tether.GetTotalLength(), 0.0f );
+			m_flSlackTime = gpGlobals->curtime;
+		}
+	}
+
+	if ( !bPinned && CatchOnEdge( pPlayer ) )
+	{
+		bPinned = GetTipPin( &vecPin );
+		bJustAnchored = true;
 	}
 
 	Vector vecTip = bPinned ? vecPin : m_Rope.GetTip();
@@ -3015,6 +3351,13 @@ IMotionEvent::simresult_e CWeaponBarnacle::Simulate( IPhysicsMotionController *p
 
 	float flGive = DotProduct( vecCenterVelocity + CrossProduct( vecTurn, vecAttach - vecMassCenter ), vecDir );
 	flGive = MAX( flGive, pObject->GetInvMass() );
+
+	// (a body hangs on the part the tongue has: of2_barnacle_corpse_heft)
+	if ( IsCorpse( pHold->hEntity ) )
+	{
+		flGive /= MAX( of2_barnacle_corpse_heft.GetFloat(), 1.0f );
+	}
+
 	if ( flGive <= 0.0f )
 		return SIM_NOTHING;
 

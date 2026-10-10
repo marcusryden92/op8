@@ -19,6 +19,9 @@
 #include "ivrenderview.h"
 #include "toolframework/itoolentity.h"
 
+class VMatrix;	// OF2
+class ITexture;
+
 //-----------------------------------------------------------------------------
 // Forward decls
 //-----------------------------------------------------------------------------
@@ -109,6 +112,11 @@ public:
 	virtual void SetShadowsDisabled( bool bDisabled ) = 0;
 
 	virtual void ComputeShadowDepthTextures( const CViewSetup &pView ) = 0;
+
+	// OF2: the shadow depth map a flashlight has in the view being drawn, and what turns
+	// a place in the world into a place on it (x, y and depth 0-1 after the divide).
+	// False if it has none: shadows off, not in view, or past the few there are.
+	virtual bool OF2_GetFlashlightDepth( ClientShadowHandle_t handle, VMatrix *pWorldToShadow, ITexture **ppDepthTexture ) = 0;
 
 };
 

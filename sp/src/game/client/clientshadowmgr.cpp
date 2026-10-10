@@ -777,6 +777,9 @@ public:
 	// Kicks off rendering into shadow depth maps (if any)
 	void ComputeShadowDepthTextures( const CViewSetup &view );
 
+	// OF2
+	bool OF2_GetFlashlightDepth( ClientShadowHandle_t handle, VMatrix *pWorldToShadow, ITexture **ppDepthTexture );
+
 	// Frees shadow depth textures for use in subsequent view/frame
 	void FreeShadowDepthTextures();
 
@@ -1049,6 +1052,10 @@ private:
 	CUtlVector< CTextureReference > m_DepthTextureCache;
 	CUtlVector< bool > m_DepthTextureCacheLocks;
 	int	m_nMaxDepthTextureShadows;
+
+	// OF2: which flashlight has which depth texture in the view being drawn
+	CUtlVector< ClientShadowHandle_t > m_OF2DepthHandles;
+	CUtlVector< ITexture * > m_OF2DepthTextures;
 
 #ifdef DYNAMIC_RTT_SHADOWS
 	bool m_bShadowFromWorldLights;
@@ -3932,6 +3939,20 @@ void CClientShadowMgr::AddShadowToReceiver( ClientShadowHandle_t handle,
 		{
 			VPROF_BUDGET( "CClientShadowMgr::AddShadowToReceiver", VPROF_BUDGETGROUP_SHADOW_DEPTH_TEXTURING );
 
+			// OF2: An NPC the lamp is inside of is the one wearing it (a head flashlight),
+			// and is not lit by it. The engine's model shaders do not clip a projection
+			// behind its origin, so the light landed on the wearer's back as well.
+			C_BaseEntity *pReceiver = pRenderable->GetIClientUnknown()->GetBaseEntity();
+			if ( pReceiver && pReceiver->IsNPC() )
+			{
+				const FlashlightState_t &lightState = shadowmgr->GetFlashlightState( shadow.m_ShadowHandle );
+				Vector vecMins, vecMaxs;
+				pRenderable->GetRenderBoundsWorldspace( vecMins, vecMaxs );
+				Vector vecLamp = lightState.m_vecLightOrigin;
+				if ( vecLamp.WithinAABox( vecMins - Vector( 4, 4, 4 ), vecMaxs + Vector( 4, 4, 4 ) ) )
+					break;
+			}
+
 			if( (!shadow.m_hTargetEntity) || IsFlashlightTarget( handle, pRenderable ) )
 			{
 				pRenderable->CreateModelInstance();
@@ -4450,6 +4471,10 @@ void CClientShadowMgr::ComputeShadowDepthTextures( const CViewSetup &viewSetup )
 	ClientShadowHandle_t pActiveDepthShadows[1024];
 	int nActiveDepthShadowCount = BuildActiveShadowDepthList( viewSetup, ARRAYSIZE( pActiveDepthShadows ), pActiveDepthShadows );
 
+	// OF2
+	m_OF2DepthHandles.RemoveAll();
+	m_OF2DepthTextures.RemoveAll();
+
 	// Iterate over all existing textures and allocate shadow textures
 	bool bDebugFrustum = r_flashlightdrawfrustum.GetBool();
 	for ( int j = 0; j < nActiveDepthShadowCount; ++j )
@@ -4560,6 +4585,10 @@ void CClientShadowMgr::ComputeShadowDepthTextures( const CViewSetup &viewSetup )
 
 		// Associate the shadow depth texture and stencil bit with the flashlight for use during scene rendering
 		shadowmgr->SetFlashlightDepthTexture( shadow.m_ShadowHandle, shadowDepthTexture, 0 );
+
+		// OF2: the cone of light in the air reads it too (C_OF2LightCone)
+		m_OF2DepthHandles.AddToTail( pActiveDepthShadows[j] );
+		m_OF2DepthTextures.AddToTail( shadowDepthTexture );
 	}
 
 	SetViewFlashlightState( nActiveDepthShadowCount, pActiveDepthShadows );
@@ -4712,11 +4741,33 @@ bool CClientShadowMgr::LockShadowDepthTexture( CTextureReference *shadowDepthTex
 //------------------------------------------------------------------
 void CClientShadowMgr::UnlockAllShadowDepthTextures()
 {
+	// OF2: the textures are anyone's again
+	m_OF2DepthHandles.RemoveAll();
+	m_OF2DepthTextures.RemoveAll();
+
 	for (int i=0; i< m_DepthTextureCache.Count(); i++ )
 	{
 		m_DepthTextureCacheLocks[i] = false;
 	}
 	SetViewFlashlightState( 0, NULL );
+}
+
+//-----------------------------------------------------------------------------
+// OF2: The shadow depth map of a flashlight, for something other than the
+// flashlight shaders to read: the light it makes in the air.
+//-----------------------------------------------------------------------------
+bool CClientShadowMgr::OF2_GetFlashlightDepth( ClientShadowHandle_t handle, VMatrix *pWorldToShadow, ITexture **ppDepthTexture )
+{
+	if ( handle == CLIENTSHADOW_INVALID_HANDLE || !m_Shadows.IsValidIndex( handle ) )
+		return false;
+
+	int i = m_OF2DepthHandles.Find( handle );
+	if ( i < 0 || !m_OF2DepthTextures[i] )
+		return false;
+
+	*pWorldToShadow = m_Shadows[handle].m_WorldToShadow;
+	*ppDepthTexture = m_OF2DepthTextures[i];
+	return true;
 }
 
 void CClientShadowMgr::SetFlashlightTarget( ClientShadowHandle_t shadowHandle, EHANDLE targetEntity )

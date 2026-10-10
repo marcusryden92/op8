@@ -56,18 +56,50 @@
 #define DISPLACER_GLOW_COLOR		150, 245, 215
 #define DISPLACER_CORE_COLOR		230, 255, 248
 
+// OF2: The flying portal: the glow at this scale (128 units across at 1), with two smaller
+// glows inside it, green and then yellow, each given as its share of that scale
+#define DISPLACER_PORTAL_SCALE		2.0f
+#define DISPLACER_PORTAL_START		0.05f	// its share of that as it leaves the gun
+#define DISPLACER_PORTAL_LAYERS		2
+// The glows add up, so each color only shows where the ones inside it have faded out: the
+// outside one is kept dim and green, and the ones inside go to yellow and get brighter.
+// (All three near full brightness, with the mint teleport color outside, came out as one cyan orb.)
+#define DISPLACER_PORTAL_RIM		30, 235, 110
+#define DISPLACER_PORTAL_RIM_ALPHA	150
+#define DISPLACER_PORTAL_GREEN		150, 255, 60
+#define DISPLACER_PORTAL_YELLOW		245, 220, 60
+static const float s_flPortalLayerScale[DISPLACER_PORTAL_LAYERS] = { 0.55f, 0.28f };
+
+// OF2: White glows that light up around a teleported thing, where it left and where it arrived
+ConVar of2_displacer_orbs( "of2_displacer_orbs", "7", FCVAR_NONE, "How many white glows light up around something the Displacer sends, at each end (32 at most)." );
+ConVar of2_displacer_orb_size( "of2_displacer_orb_size", "0.5", FCVAR_NONE, "Size of those white glows; 1 is about the size of the thing sent." );
+ConVar of2_displacer_orb_time( "of2_displacer_orb_time", "1", FCVAR_NONE, "How long those white glows last; 1 is 0.4 to 1 second each." );
+
+// OF2: Glows in the muzzle flash, the bright one on the muzzle included
+#define DISPLACER_MUZZLE_ORBS		8
+
 ConVar of2_displacer_range( "of2_displacer_range", "2500", FCVAR_NONE, "How far away a Displacer destination or target can be marked, and how far the player can get from it before the signal is lost." );
 ConVar of2_displacer_noise( "of2_displacer_noise", "10000", FCVAR_NONE, "How far NPCs hear a Displacer teleport, in units, from where the thing left and from where it arrived (an explosion: of2_explosion_noise, 30000). 0 for silent." );
 ConVar of2_displacer_cooldown( "of2_displacer_cooldown", "0.5", FCVAR_NONE, "Seconds between Displacer shots or self-teleports." );
 ConVar of2_displacer_clear_hold( "of2_displacer_clear_hold", "0.5", FCVAR_NONE, "Holding reload this long clears the Displacer destination; letting go sooner teleports the player." );
-ConVar of2_displacer_portal_speed( "of2_displacer_portal_speed", "2600", FCVAR_NONE, "Speed of the Displacer's portal projectile." );
+ConVar of2_displacer_portal_speed( "of2_displacer_portal_speed", "1500", FCVAR_NONE, "Speed of the Displacer's portal projectile." );
 ConVar of2_displacer_portal_life( "of2_displacer_portal_life", "10", FCVAR_NONE, "Seconds before a Displacer portal that hit nothing removes itself." );
-ConVar of2_displacer_debug( "of2_displacer_debug", "0", FCVAR_NONE, "Draw a box at the Displacer destination (the HUD marks it otherwise), and the box of the last thing placed there." );
+ConVar of2_displacer_charge( "of2_displacer_charge", "1", FCVAR_NONE, "Seconds the Displacer charges between pulling the trigger and the portal leaving. 0 fires at once." );
+ConVar of2_displacer_portal_grow( "of2_displacer_portal_grow", "0.01", FCVAR_NONE, "Seconds a Displacer portal takes to grow to full size after leaving the gun." );
+ConVar of2_displacer_muzzle( "of2_displacer_muzzle", "32 10 -9", FCVAR_NONE, "Where the Displacer portal starts, from the eyes: forward right up. It still heads for what the crosshair is on." );
+ConVar of2_displacer_flash( "of2_displacer_flash", "20 4 -9", FCVAR_NONE, "Where the Displacer muzzle flash is, from the eyes: forward right up." );
+ConVar of2_displacer_flash_size( "of2_displacer_flash_size", "0.5", FCVAR_NONE, "Size of the Displacer muzzle flash." );
+ConVar of2_displacer_flash_preview( "of2_displacer_flash_preview", "0", FCVAR_NONE, "Mark where the Displacer muzzle flash is (white cross) and where the portal starts (green cross) while the weapon is held, for placing them." );
+ConVar of2_displacer_recoil( "of2_displacer_recoil", "5", FCVAR_NONE, "How far a Displacer shot kicks the view up, in degrees." );
+ConVar of2_displacer_whiten( "of2_displacer_whiten", "0.06", FCVAR_NONE, "Seconds something a Displacer portal hit takes to turn into a white silhouette before it is sent. 0 sends it at once, as it is." );
+ConVar of2_displacer_whiten_fade( "of2_displacer_whiten_fade", "0.15", FCVAR_NONE, "Seconds something the Displacer sent takes to get its own look back after arriving white." );
+ConVar of2_displacer_debug("of2_displacer_debug", "0", FCVAR_NONE, "Draw a box at the Displacer destination (the HUD marks it otherwise), and the box of the last thing placed there." );
 
 static int s_nDisplacerRingTexture = 0;
 static const char *s_pDestinationContext = "DisplacerDestinationThink";
 static const char *s_pPortalExpireContext = "DisplacerPortalExpire";
 static const char *s_pPortalImpactContext = "DisplacerPortalImpact";
+static const char *s_pPortalZapContext = "DisplacerPortalZap";
 
 //-----------------------------------------------------------------------------
 // trigger_displacer_block: no destination inside it, and nothing may be
@@ -237,32 +269,111 @@ static Vector Displacer_PlaceBox( const Vector &vecPoint, const Vector &vecNorma
 }
 
 //-----------------------------------------------------------------------------
+// OF2: A glow that lights up and goes out. A sprite told to FadeAndDie in the tick
+// it is made reaches the client with its brightness already at 0, with nothing to
+// fade from, and is never seen (every glow of the teleport and the muzzle flash was
+// made that way). This one is sent at full brightness and starts fading a moment later.
+//-----------------------------------------------------------------------------
+#define DISPLACER_GLOW_HOLD		0.1f
+
+class CDisplacerGlow : public CSprite
+{
+	DECLARE_CLASS( CDisplacerGlow, CSprite );
+
+public:
+	DECLARE_DATADESC();
+
+	static CDisplacerGlow *GlowCreate( const Vector &vecOrigin );
+
+	// Call last: full brightness for DISPLACER_GLOW_HOLD, then out over flFade, then removed
+	void	LightUp( float flFade );
+	void	FadeThink( void );
+
+private:
+	float	m_flFade;
+};
+
+LINK_ENTITY_TO_CLASS( displacer_glow, CDisplacerGlow );
+
+BEGIN_DATADESC( CDisplacerGlow )
+
+	DEFINE_FIELD( m_flFade, FIELD_FLOAT ),
+	DEFINE_THINKFUNC( FadeThink ),
+
+END_DATADESC()
+
+CDisplacerGlow *CDisplacerGlow::GlowCreate( const Vector &vecOrigin )
+{
+	CDisplacerGlow *pGlow = CREATE_ENTITY( CDisplacerGlow, "displacer_glow" );
+	pGlow->SpriteInit( DISPLACER_GLOW_SPRITE, vecOrigin );
+	pGlow->SetSolid( SOLID_NONE );
+	pGlow->SetMoveType( MOVETYPE_NONE );
+	return pGlow;
+}
+
+void CDisplacerGlow::LightUp( float flFade )
+{
+	SetAsTemporary();
+	m_flFade = flFade;
+	SetThink( &CDisplacerGlow::FadeThink );
+	SetNextThink( gpGlobals->curtime + DISPLACER_GLOW_HOLD );
+}
+
+void CDisplacerGlow::FadeThink( void )
+{
+	FadeAndDie( m_flFade );
+}
+
+//-----------------------------------------------------------------------------
 // Where something left or arrived: the teleport sprite, a ring, and on the
 // client arcs, sparks and a flash of light (DisplacerTeleport, c_weapon_displacer.cpp).
 // pArrived is the thing itself once it stands at the new place.
 //-----------------------------------------------------------------------------
-static void Displacer_TeleportEffect( const Vector &vecPos, float flRadius, CBaseEntity *pArrived, const char *pszSound )
+static void Displacer_TeleportEffect( const Vector &vecPos, float flRadius, CBaseEntity *pArrived, const char *pszSound, CBaseEntity *pLeft = NULL )
 {
 	// The sprite is 128 units across at scale 1: a wide soft glow that lingers,
 	// larger than what it swallows, and a brighter middle that goes out first
 	float flScale = clamp( flRadius / 28.0f, 0.75f, 4.0f );
 
-	CSprite *pGlow = CSprite::SpriteCreate( DISPLACER_GLOW_SPRITE, vecPos, false );
+	CDisplacerGlow *pGlow = CDisplacerGlow::GlowCreate( vecPos );
 	if ( pGlow )
 	{
 		pGlow->SetTransparency( kRenderTransAdd, DISPLACER_GLOW_COLOR, 255, kRenderFxNone );
 		pGlow->SetScale( flScale );
-		pGlow->SetAsTemporary();
-		pGlow->FadeAndDie( 0.6f );
+		pGlow->LightUp( 0.6f );
 	}
 
-	CSprite *pCore = CSprite::SpriteCreate( DISPLACER_GLOW_SPRITE, vecPos, false );
+	CDisplacerGlow *pCore = CDisplacerGlow::GlowCreate( vecPos );
 	if ( pCore )
 	{
 		pCore->SetTransparency( kRenderTransAdd, DISPLACER_CORE_COLOR, 255, kRenderFxNone );
 		pCore->SetScale( flScale * 0.5f );
-		pCore->SetAsTemporary();
-		pCore->FadeAndDie( 0.25f );
+		pCore->LightUp( 0.25f );
+	}
+
+	// OF2: White glows around it, about as big as the thing itself, going out one after the other
+	// Each is two glows, a wide one and a small one in its middle: the sprite is soft, and
+	// on its own a big one is a faint haze (the user: barely visible, at seven of them).
+	int nOrbs = clamp( of2_displacer_orbs.GetInt(), 0, 32 );
+	for ( int i = 0; i < nOrbs; i++ )
+	{
+		Vector vecDir = RandomVector( -1.0f, 1.0f );
+		VectorNormalize( vecDir );
+
+		Vector vecOrb = vecPos + vecDir * flRadius * RandomFloat( 0.5f, 1.1f );
+		float flOrbScale = flScale * RandomFloat( 0.5f, 1.1f ) * of2_displacer_orb_size.GetFloat();
+		float flOrbLife = RandomFloat( 0.4f, 1.0f ) * of2_displacer_orb_time.GetFloat();
+
+		for ( int j = 0; j < 2; j++ )
+		{
+			CDisplacerGlow *pOrb = CDisplacerGlow::GlowCreate( vecOrb );
+			if ( pOrb )
+			{
+				pOrb->SetTransparency( kRenderTransAdd, 255, 255, 255, 255, kRenderFxNone );
+				pOrb->SetScale( j == 0 ? flOrbScale : flOrbScale * 0.4f );
+				pOrb->LightUp( flOrbLife );
+			}
+		}
 	}
 
 	CBroadcastRecipientFilter filter;
@@ -285,9 +396,10 @@ static void Displacer_TeleportEffect( const Vector &vecPos, float flRadius, CBas
 	CEffectData data;
 	data.m_vOrigin = vecPos;
 	data.m_flRadius = flRadius;
-	if ( pArrived )
+	// OF2: the client takes the arcs' starting points from the thing's shape, also where it left (pLeft)
+	if ( pArrived || pLeft )
 	{
-		data.m_nEntIndex = pArrived->entindex();
+		data.m_nEntIndex = pArrived ? pArrived->entindex() : pLeft->entindex();
 	}
 	DispatchEffect( "DisplacerTeleport", data );
 
@@ -299,7 +411,8 @@ static void Displacer_TeleportEffect( const Vector &vecPos, float flRadius, CBas
 		tesla.m_flMagnitude = 8;
 		tesla.m_flScale = 2.0f;
 		tesla.m_bCustomColors = true;
-		tesla.m_CustomColors.m_vecColor1 = Vector( DISPLACER_GLOW_COLOR ) / 255.0f;
+		// OF2: white, as the arcs off the thing (the user asked)
+		tesla.m_CustomColors.m_vecColor1 = Vector( 1.0f, 1.0f, 1.0f );
 		DispatchEffect( "TeslaHitboxes", tesla );
 	}
 
@@ -395,6 +508,15 @@ private:
 	void	TeleportSelf( void );
 	void	DryFire( void );
 
+	// OF2: the trigger starts a charge, and the portal leaves when it is done
+	void	FirePortal( void );
+	void	FinishTeleportSelf( void );
+	bool	StartCharge( bool bSelf );
+	void	EndCharge( void );
+	void	CancelCharge( void );
+	void	GetMuzzlePoints( CBasePlayer *pOwner, Vector &vecFlash, Vector &vecStart );
+	void	MuzzleFlash( CBasePlayer *pOwner, const Vector &vecPos, const Vector &vecDir );
+
 	void	SetDestination( const Vector &vecPoint, const Vector &vecNormal, CBaseEntity *pTarget = NULL );
 	void	ClearDestination( void );
 	void	UpdateTarget( void );
@@ -421,6 +543,12 @@ private:
 	Vector			m_vecDestNormal;
 	string_t		m_iszDestMap;				// destinations don't survive a level change
 	float			m_flReloadPressTime;		// when reload went down, -1 once that press is dealt with
+
+	CNetworkVar( bool, m_bCharging );			// OF2: charging to fire; the client spins the gun up (c_weapon_displacer.cpp)
+	CNetworkVar( float, m_flSelfTeleportTime );	// OF2: when the player last sent themselves; the client spins the gun up
+	float			m_flChargeEnd;
+	bool			m_bChargeSelf;				// the charge ends in the player being sent, not in a shot
+	int				m_iShot;					// which of the three fire sounds is next
 };
 
 //-----------------------------------------------------------------------------
@@ -491,12 +619,17 @@ public:
 
 	void	PortalTouch( CBaseEntity *pOther );
 	void	ImpactThink( void );
+	void	ZapThink( void );	// OF2
+	void	UpdateOnRemove( void );
 
 	unsigned int PhysicsSolidMaskForEntity( void ) const;
 
 private:
 	CHandle<CWeaponDisplacer>	m_hWeapon;
 	EHANDLE						m_hTarget;
+	CHandle<CSprite>			m_hLayers[DISPLACER_PORTAL_LAYERS];	// OF2: the glows inside it
+	float						m_flSpawnTime;	// OF2: it leaves the gun small and grows
+	bool						m_bGrowing;
 };
 
 LINK_ENTITY_TO_CLASS( displacer_portal, CDisplacerPortal );
@@ -505,9 +638,13 @@ BEGIN_DATADESC( CDisplacerPortal )
 
 	DEFINE_FIELD( m_hWeapon, FIELD_EHANDLE ),
 	DEFINE_FIELD( m_hTarget, FIELD_EHANDLE ),
+	DEFINE_ARRAY( m_hLayers, FIELD_EHANDLE, DISPLACER_PORTAL_LAYERS ),
+	DEFINE_FIELD( m_flSpawnTime, FIELD_TIME ),
+	DEFINE_FIELD( m_bGrowing, FIELD_BOOLEAN ),
 
 	DEFINE_ENTITYFUNC( PortalTouch ),
 	DEFINE_THINKFUNC( ImpactThink ),
+	DEFINE_THINKFUNC( ZapThink ),
 
 END_DATADESC()
 
@@ -516,8 +653,32 @@ CDisplacerPortal *CDisplacerPortal::PortalCreate( const Vector &vecOrigin, const
 	CDisplacerPortal *pPortal = CREATE_ENTITY( CDisplacerPortal, "displacer_portal" );
 	pPortal->SpriteInit( DISPLACER_GLOW_SPRITE, vecOrigin );
 
-	pPortal->SetTransparency( kRenderTransAdd, DISPLACER_GLOW_COLOR, 255, kRenderFxNone );
-	pPortal->SetScale( 0.675f );	// OF2: half again as large as the first 0.45
+	pPortal->SetTransparency( kRenderTransAdd, DISPLACER_PORTAL_RIM, DISPLACER_PORTAL_RIM_ALPHA, kRenderFxNone );
+	// OF2: small at the gun; the first ZapThink starts it growing, so the client sees a change to grow through
+	pPortal->SetScale( DISPLACER_PORTAL_SCALE * DISPLACER_PORTAL_START );
+	pPortal->m_flSpawnTime = gpGlobals->curtime;
+	pPortal->m_bGrowing = false;
+
+	// OF2: Rings of color inside it: the smaller glows add up towards the middle
+	for ( int i = 0; i < DISPLACER_PORTAL_LAYERS; i++ )
+	{
+		CSprite *pLayer = CSprite::SpriteCreate( DISPLACER_GLOW_SPRITE, vecOrigin, false );
+		if ( pLayer == NULL )
+			continue;
+
+		if ( i == 0 )
+		{
+			pLayer->SetTransparency( kRenderTransAdd, DISPLACER_PORTAL_GREEN, 200, kRenderFxNone );
+		}
+		else
+		{
+			pLayer->SetTransparency( kRenderTransAdd, DISPLACER_PORTAL_YELLOW, 255, kRenderFxNone );
+		}
+		pLayer->SetScale( DISPLACER_PORTAL_SCALE * DISPLACER_PORTAL_START * s_flPortalLayerScale[i] );
+		pLayer->SetParent( pPortal );
+		pLayer->SetLocalOrigin( vec3_origin );
+		pPortal->m_hLayers[i] = pLayer;
+	}
 
 	pPortal->SetSolid( SOLID_BBOX );
 	pPortal->AddSolidFlags( FSOLID_NOT_STANDABLE );
@@ -532,8 +693,65 @@ CDisplacerPortal *CDisplacerPortal::PortalCreate( const Vector &vecOrigin, const
 
 	pPortal->SetTouch( &CDisplacerPortal::PortalTouch );
 	pPortal->SetContextThink( &CBaseEntity::SUB_Remove, gpGlobals->curtime + of2_displacer_portal_life.GetFloat(), s_pPortalExpireContext );
+	pPortal->SetContextThink( &CDisplacerPortal::ZapThink, gpGlobals->curtime + 0.03f, s_pPortalZapContext );
+
+	// OF2: it crackles as it flies
+	pPortal->EmitSound( "Weapon_Displacer.OrbLoop" );
 
 	return pPortal;
+}
+
+//-----------------------------------------------------------------------------
+// OF2: Now and then in flight: a thin arc to something nearby (the client looks
+// for it and draws it, DisplacerZap in c_weapon_displacer.cpp), and the glows
+// inside swell or shrink a little
+//-----------------------------------------------------------------------------
+void CDisplacerPortal::ZapThink( void )
+{
+	float flNext = RandomFloat( 0.03f, 0.08f );
+
+	// Out of the gun: up to full size over of2_displacer_portal_grow
+	float flGrow = MAX( of2_displacer_portal_grow.GetFloat(), 0.01f );
+	if ( !m_bGrowing )
+	{
+		m_bGrowing = true;
+		SetScale( DISPLACER_PORTAL_SCALE, flGrow );
+	}
+	float flSize = clamp( ( gpGlobals->curtime + flNext - m_flSpawnTime ) / flGrow, DISPLACER_PORTAL_START, 1.0f );
+
+	Vector vecDir = GetAbsVelocity();
+	VectorNormalize( vecDir );
+
+	CEffectData data;
+	data.m_vOrigin = GetAbsOrigin();
+	data.m_vNormal = vecDir;
+	data.m_nEntIndex = entindex();
+	DispatchEffect( "DisplacerZap", data );
+
+	for ( int i = 0; i < DISPLACER_PORTAL_LAYERS; i++ )
+	{
+		if ( m_hLayers[i] )
+		{
+			m_hLayers[i]->SetScale( DISPLACER_PORTAL_SCALE * flSize * s_flPortalLayerScale[i] * RandomFloat( 0.85f, 1.15f ), flNext );
+		}
+	}
+
+	SetContextThink( &CDisplacerPortal::ZapThink, gpGlobals->curtime + flNext, s_pPortalZapContext );
+}
+
+void CDisplacerPortal::UpdateOnRemove( void )
+{
+	StopSound( "Weapon_Displacer.OrbLoop" );
+
+	for ( int i = 0; i < DISPLACER_PORTAL_LAYERS; i++ )
+	{
+		if ( m_hLayers[i] )
+		{
+			UTIL_Remove( m_hLayers[i] );
+		}
+	}
+
+	BaseClass::UpdateOnRemove();
 }
 
 //-----------------------------------------------------------------------------
@@ -560,6 +778,17 @@ void CDisplacerPortal::PortalTouch( CBaseEntity *pOther )
 	SetMoveType( MOVETYPE_NONE );
 	TurnOff();
 
+	// OF2: the glows inside, the arcs and the crackle go out with it
+	StopSound( "Weapon_Displacer.OrbLoop" );
+	SetContextThink( NULL, TICK_NEVER_THINK, s_pPortalZapContext );
+	for ( int i = 0; i < DISPLACER_PORTAL_LAYERS; i++ )
+	{
+		if ( m_hLayers[i] )
+		{
+			m_hLayers[i]->TurnOff();
+		}
+	}
+
 	const trace_t &tr = GetTouchTrace();
 	if ( pOther->IsWorld() && ( tr.surface.flags & SURF_SKY ) )
 	{
@@ -571,7 +800,28 @@ void CDisplacerPortal::PortalTouch( CBaseEntity *pOther )
 	// The teleport waits for our next think. This touch can come from inside the
 	// other entity's own move, or from a physics callback, where it can't be moved.
 	m_hTarget = bDisplaceable ? pOther : NULL;
-	SetContextThink( &CDisplacerPortal::ImpactThink, gpGlobals->curtime, s_pPortalImpactContext );
+
+	// OF2: What is about to go turns into a white silhouette first (the Combine ball's
+	// black one, the other way round), and is only sent once it is all white. The client
+	// draws it ("DisplacerWhiten", c_weapon_displacer.cpp) and fades it back afterwards.
+	float flDelay = 0.0f;
+	CWeaponDisplacer *pWeapon = m_hWeapon;
+	if ( bDisplaceable && pWeapon && pWeapon->HasDestination() && of2_displacer_whiten.GetFloat() > 0.0f )
+	{
+		flDelay = of2_displacer_whiten.GetFloat();
+
+		CEffectData data;
+		data.m_vOrigin = pOther->WorldSpaceCenter();
+		data.m_nEntIndex = pOther->entindex();
+		data.m_flScale = flDelay;
+		data.m_flMagnitude = of2_displacer_whiten_fade.GetFloat();
+		DispatchEffect( "DisplacerWhiten", data );
+
+		// Running out in the meantime would lose the teleport
+		SetContextThink( NULL, TICK_NEVER_THINK, s_pPortalExpireContext );
+	}
+
+	SetContextThink( &CDisplacerPortal::ImpactThink, gpGlobals->curtime + flDelay, s_pPortalImpactContext );
 }
 
 void CDisplacerPortal::ImpactThink( void )
@@ -601,6 +851,8 @@ IMPLEMENT_SERVERCLASS_ST( CWeaponDisplacer, DT_WeaponDisplacer )
 	SendPropTime( SENDINFO( m_flSignalLostTime ) ),
 	SendPropBool( SENDINFO( m_bDestIsTarget ) ),
 	SendPropEHandle( SENDINFO( m_hDestTarget ) ),
+	SendPropBool( SENDINFO( m_bCharging ) ),
+	SendPropTime( SENDINFO( m_flSelfTeleportTime ) ),
 END_SEND_TABLE()
 
 BEGIN_DATADESC( CWeaponDisplacer )
@@ -614,7 +866,8 @@ BEGIN_DATADESC( CWeaponDisplacer )
 	DEFINE_FIELD( m_iSignal,			FIELD_INTEGER ),
 	DEFINE_FIELD( m_iszDestMap,			FIELD_STRING ),
 
-	// m_flSignalLostTime and m_flReloadPressTime only matter for a moment; not saved
+	// m_flSignalLostTime and m_flReloadPressTime only matter for a moment; not saved.
+	// Nor is a charge: a load starts with the gun at rest.
 
 	DEFINE_THINKFUNC( DestinationThink ),
 
@@ -632,14 +885,28 @@ CWeaponDisplacer::CWeaponDisplacer()
 	m_flSignalLostTime = 0.0f;
 	m_iszDestMap = NULL_STRING;
 	m_flReloadPressTime = -1.0f;
+	m_bCharging = false;
+	m_flChargeEnd = 0.0f;
+	m_bChargeSelf = false;
+	m_flSelfTeleportTime = 0.0f;
+	m_iShot = 0;
 }
 
 void CWeaponDisplacer::Precache( void )
 {
 	PrecacheModel( DISPLACER_GLOW_SPRITE );
+	// OF2: the gun the client draws in the hands of the viewmodel (c_weapon_displacer.cpp)
+	PrecacheModel( "models/weapons/v_displacer_gun.mdl" );
 	s_nDisplacerRingTexture = PrecacheModel( DISPLACER_RING_SPRITE );
+	// OF2: the white silhouette (client)
+	PrecacheMaterial( "effects/of2_displacer_white" );
 
-	PrecacheScriptSound( "Weapon_Displacer.Fire" );
+	PrecacheScriptSound( "Weapon_Displacer.Fire1" );
+	PrecacheScriptSound( "Weapon_Displacer.Fire2" );
+	PrecacheScriptSound( "Weapon_Displacer.Fire3" );
+	PrecacheScriptSound( "Weapon_Displacer.Charge" );
+	PrecacheScriptSound( "Weapon_Displacer.ChargeWindup" );
+	PrecacheScriptSound( "Weapon_Displacer.OrbLoop" );
 	PrecacheScriptSound( "Weapon_Displacer.Empty" );
 	PrecacheScriptSound( "Weapon_Displacer.Fizzle" );
 	PrecacheScriptSound( "Weapon_Displacer.SetDestination" );
@@ -676,12 +943,14 @@ void CWeaponDisplacer::OnRestore( void )
 
 void CWeaponDisplacer::UpdateOnRemove( void )
 {
+	CancelCharge();
 	ClearDestination();
 	BaseClass::UpdateOnRemove();
 }
 
 void CWeaponDisplacer::Drop( const Vector &vecVelocity )
 {
+	CancelCharge();
 	ClearDestination();
 	BaseClass::Drop( vecVelocity );
 }
@@ -694,6 +963,7 @@ bool CWeaponDisplacer::Deploy( void )
 
 bool CWeaponDisplacer::Holster( CBaseCombatWeapon *pSwitchingTo )
 {
+	CancelCharge();
 	m_flReloadPressTime = -1.0f;
 	return BaseClass::Holster( pSwitchingTo );
 }
@@ -707,6 +977,32 @@ void CWeaponDisplacer::ItemPostFrame( void )
 	CBasePlayer *pOwner = ToBasePlayer( GetOwner() );
 	if ( pOwner == NULL )
 		return;
+
+	// OF2: charging: nothing else until the portal has left
+	if ( m_bCharging )
+	{
+		m_flReloadPressTime = -1.0f;
+		if ( gpGlobals->curtime >= m_flChargeEnd )
+		{
+			if ( m_bChargeSelf )
+			{
+				FinishTeleportSelf();
+			}
+			else
+			{
+				FirePortal();
+			}
+		}
+		return;
+	}
+
+	if ( of2_displacer_flash_preview.GetBool() )
+	{
+		Vector vecFlash, vecStart;
+		GetMuzzlePoints( pOwner, vecFlash, vecStart );
+		NDebugOverlay::Cross3D( vecFlash, 2.0f, 255, 255, 255, true, 0.05f );
+		NDebugOverlay::Cross3D( vecStart, 2.0f, DISPLACER_COLOR, true, 0.05f );
+	}
 
 	UpdateReloadKey( pOwner );
 
@@ -762,7 +1058,8 @@ void CWeaponDisplacer::DryFire( void )
 }
 
 //-----------------------------------------------------------------------------
-// Shoot a portal
+// The trigger: charge up, then shoot a portal (FirePortal). As in Opposing Force,
+// one pull is enough; it does not have to be held.
 //-----------------------------------------------------------------------------
 void CWeaponDisplacer::PrimaryAttack( void )
 {
@@ -773,6 +1070,139 @@ void CWeaponDisplacer::PrimaryAttack( void )
 	if ( !m_bHasDestination || !CanAffordDisplacement() )
 	{
 		// Nowhere to send anything
+		DryFire();
+		m_flNextPrimaryAttack = gpGlobals->curtime + 0.5f;
+		return;
+	}
+
+	if ( !StartCharge( false ) )
+	{
+		FirePortal();
+	}
+}
+
+//-----------------------------------------------------------------------------
+// The charge before a shot (bSelf false) or before the player sends themselves
+// Output : false if there is none to wait for (of2_displacer_charge 0)
+//-----------------------------------------------------------------------------
+bool CWeaponDisplacer::StartCharge( bool bSelf )
+{
+	float flCharge = of2_displacer_charge.GetFloat();
+	if ( flCharge <= 0.0f )
+		return false;
+
+	m_bCharging = true;
+	m_bChargeSelf = bSelf;
+	m_flChargeEnd = gpGlobals->curtime + flCharge;
+
+	// Nothing else until it is done
+	m_flNextPrimaryAttack = m_flChargeEnd + MAX( of2_displacer_cooldown.GetFloat(), 0.1f );
+	m_flNextSecondaryAttack = m_flChargeEnd;
+
+	EmitSound( "Weapon_Displacer.Charge" );
+	EmitSound( "Weapon_Displacer.ChargeWindup" );
+	return true;
+}
+
+void CWeaponDisplacer::EndCharge( void )
+{
+	if ( !m_bCharging )
+		return;
+
+	m_bCharging = false;
+	StopSound( "Weapon_Displacer.Charge" );
+	StopSound( "Weapon_Displacer.ChargeWindup" );
+}
+
+void CWeaponDisplacer::CancelCharge( void )
+{
+	if ( !m_bCharging )
+		return;
+
+	EndCharge();
+	m_flNextPrimaryAttack = gpGlobals->curtime + 0.3f;
+}
+
+//-----------------------------------------------------------------------------
+// Where the muzzle flash is and where the portal starts, both set from the eyes
+// by convar (of2_displacer_flash, of2_displacer_muzzle)
+//-----------------------------------------------------------------------------
+void CWeaponDisplacer::GetMuzzlePoints( CBasePlayer *pOwner, Vector &vecFlash, Vector &vecStart )
+{
+	Vector vecForward, vecRight, vecUp;
+	pOwner->EyeVectors( &vecForward, &vecRight, &vecUp );
+	Vector vecEye = pOwner->Weapon_ShootPosition();
+
+	Vector vecOffset( 20, 4, -9 );
+	UTIL_StringToVector( vecOffset.Base(), of2_displacer_flash.GetString() );
+	vecFlash = vecEye + vecForward * vecOffset.x + vecRight * vecOffset.y + vecUp * vecOffset.z;
+
+	vecOffset.Init( 32, 10, -9 );
+	UTIL_StringToVector( vecOffset.Base(), of2_displacer_muzzle.GetString() );
+	vecStart = vecEye + vecForward * vecOffset.x + vecRight * vecOffset.y + vecUp * vecOffset.z;
+}
+
+//-----------------------------------------------------------------------------
+// Where the portal leaves: sparks, a bright glow on the muzzle with a wider one
+// behind it, and a few small ones around. They go with the player, who may be
+// running, for the moment they last.
+//-----------------------------------------------------------------------------
+void CWeaponDisplacer::MuzzleFlash( CBasePlayer *pOwner, const Vector &vecPos, const Vector &vecDir )
+{
+	g_pEffects->Sparks( vecPos, 3, 2, &vecDir );
+
+	float flSize = clamp( of2_displacer_flash_size.GetFloat(), 0.1f, 10.0f );
+
+	for ( int i = 0; i < DISPLACER_MUZZLE_ORBS; i++ )
+	{
+		// The first two sit on the muzzle, the rest around and ahead of it
+		Vector vecOrb = vecPos;
+		if ( i > 1 )
+		{
+			vecOrb += ( RandomVector( -6.0f, 6.0f ) + vecDir * RandomFloat( 0.0f, 12.0f ) ) * flSize;
+		}
+
+		CDisplacerGlow *pOrb = CDisplacerGlow::GlowCreate( vecOrb );
+		if ( pOrb == NULL )
+			continue;
+
+		float flLife = RandomFloat( 0.1f, 0.3f );
+		if ( i == 0 )
+		{
+			pOrb->SetTransparency( kRenderTransAdd, DISPLACER_CORE_COLOR, 255, kRenderFxNone );
+			pOrb->SetScale( 0.45f * flSize );
+			flLife = 0.3f;
+		}
+		else if ( i == 1 )
+		{
+			pOrb->SetTransparency( kRenderTransAdd, DISPLACER_GLOW_COLOR, 255, kRenderFxNone );
+			pOrb->SetScale( 0.9f * flSize );
+			flLife = 0.4f;
+		}
+		else
+		{
+			pOrb->SetTransparency( kRenderTransAdd, DISPLACER_GLOW_COLOR, 255, kRenderFxNone );
+			pOrb->SetScale( RandomFloat( 0.06f, 0.18f ) * flSize );
+		}
+		pOrb->SetParent( pOwner );
+		pOrb->LightUp( flLife );
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Shoot a portal
+//-----------------------------------------------------------------------------
+void CWeaponDisplacer::FirePortal( void )
+{
+	CBasePlayer *pOwner = ToBasePlayer( GetOwner() );
+	if ( pOwner == NULL )
+		return;
+
+	EndCharge();
+
+	if ( !m_bHasDestination || !CanAffordDisplacement() )
+	{
+		// The destination went while it charged
 		DryFire();
 		m_flNextPrimaryAttack = gpGlobals->curtime + 0.5f;
 		return;
@@ -790,7 +1220,8 @@ void CWeaponDisplacer::PrimaryAttack( void )
 
 	Vector vecSrc = vecEye;
 	Vector vecDir = vecForward;
-	Vector vecMuzzle = vecEye + vecForward * 20.0f + vecRight * 6.0f - vecUp * 6.0f;
+	Vector vecFlash, vecMuzzle;
+	GetMuzzlePoints( pOwner, vecFlash, vecMuzzle );
 	Vector vecPortalSize( DISPLACER_PORTAL_SIZE, DISPLACER_PORTAL_SIZE, DISPLACER_PORTAL_SIZE );
 
 	// Unless the target is right in front of us or the gun is poking into something
@@ -808,10 +1239,19 @@ void CWeaponDisplacer::PrimaryAttack( void )
 
 	CDisplacerPortal::PortalCreate( vecSrc, vecDir * of2_displacer_portal_speed.GetFloat(), pOwner, this );
 
-	EmitSound( "Weapon_Displacer.Fire" );
+	// At the gun even when the portal itself had to start at the eyes
+	MuzzleFlash( pOwner, vecFlash, vecDir );
+
+	// The three shots in turn
+	static const char *s_pszFireSounds[] = { "Weapon_Displacer.Fire1", "Weapon_Displacer.Fire2", "Weapon_Displacer.Fire3" };
+	EmitSound( s_pszFireSounds[ m_iShot % ARRAYSIZE( s_pszFireSounds ) ] );
+	m_iShot = ( m_iShot + 1 ) % ARRAYSIZE( s_pszFireSounds );
 	SendWeaponAnim( ACT_VM_PRIMARYATTACK );
 	pOwner->SetAnimation( PLAYER_ATTACK1 );
-	pOwner->ViewPunch( QAngle( -1, 0, 0 ) );
+
+	// The kick: up, and a little to one side
+	float flRecoil = of2_displacer_recoil.GetFloat();
+	pOwner->ViewPunch( QAngle( -flRecoil, RandomFloat( -0.25f, 0.25f ) * flRecoil, 0 ) );
 }
 
 //-----------------------------------------------------------------------------
@@ -853,7 +1293,6 @@ void CWeaponDisplacer::SecondaryAttack( void )
 		SetDestination( tr.m_pEnt->WorldSpaceCenter(), Vector( 0, 0, 1 ), tr.m_pEnt );
 
 		pOwner->EmitSound( "Weapon_Displacer.SetDestination" );
-		SendWeaponAnim( ACT_VM_SECONDARYATTACK );
 		return;
 	}
 
@@ -869,7 +1308,6 @@ void CWeaponDisplacer::SecondaryAttack( void )
 	SetDestination( tr.endpos, tr.plane.normal );
 
 	pOwner->EmitSound( "Weapon_Displacer.SetDestination" );
-	SendWeaponAnim( ACT_VM_SECONDARYATTACK );
 }
 
 //-----------------------------------------------------------------------------
@@ -891,6 +1329,30 @@ void CWeaponDisplacer::TeleportSelf( void )
 		return;
 	}
 
+	// OF2: the same charge as a shot, then FinishTeleportSelf
+	if ( !StartCharge( true ) )
+	{
+		FinishTeleportSelf();
+	}
+}
+
+void CWeaponDisplacer::FinishTeleportSelf( void )
+{
+	CBasePlayer *pOwner = ToBasePlayer( GetOwner() );
+	if ( pOwner == NULL )
+		return;
+
+	EndCharge();
+
+	m_flNextPrimaryAttack = gpGlobals->curtime + MAX( of2_displacer_cooldown.GetFloat(), 0.1f );
+
+	if ( !m_bHasDestination || pOwner->IsInAVehicle() )
+	{
+		// The destination went while it charged
+		DryFire();
+		return;
+	}
+
 	if ( !DisplaceEntity( pOwner ) )
 	{
 		// No room for us there
@@ -898,8 +1360,6 @@ void CWeaponDisplacer::TeleportSelf( void )
 		Displacer_Fizzle( m_vecDestPoint + m_vecDestNormal * 2.0f );
 		return;
 	}
-
-	m_flNextPrimaryAttack = gpGlobals->curtime + MAX( of2_displacer_cooldown.GetFloat(), 0.1f );
 
 	color32 flash = { DISPLACER_GLOW_COLOR, 96 };
 	UTIL_ScreenFade( pOwner, flash, 0.3f, 0.0f, FFADE_IN );
@@ -1013,7 +1473,7 @@ bool CWeaponDisplacer::DisplaceEntity( CBaseEntity *pEntity )
 
 	SpendDisplacementCost();
 
-	Displacer_TeleportEffect( vecFrom, flRadius, NULL, "Weapon_Displacer.TeleportOut" );
+	Displacer_TeleportEffect( vecFrom, flRadius, NULL, "Weapon_Displacer.TeleportOut", pEntity );
 	Displacer_TeleportEffect( pEntity->WorldSpaceCenter(), flRadius, pEntity, "Weapon_Displacer.TeleportIn" );
 
 	// OF2: Stealth. A teleport is nearly as loud as an explosion, at both ends, whatever

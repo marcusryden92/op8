@@ -3605,6 +3605,18 @@ bool CHL2_Player::ClientCommand( const CCommand &args )
 		return true;
 	}
 
+	// OF2: Barnacle. The client reports where the mouth of the barnacle in the hand is from the
+	// eyes (c_of2_tongue.cpp); the tongue is held from there (hl_gamemovement.cpp).
+	if ( !Q_stricmp( args[0], "of2_tether_mouth" ) )
+	{
+		if ( args.ArgC() > 3 )
+		{
+			extern void OF2_SetTetherWeaponOffset( float flForward, float flRight, float flDown );
+			OF2_SetTetherWeaponOffset( atof( args[1] ), atof( args[2] ), atof( args[3] ) );
+		}
+		return true;
+	}
+
 	// OF2: ...and how bright it is where an NPC that asked stands (CAI_BaseNPC::m_bOF2WantsLight)
 	if ( !Q_stricmp( args[0], "of2_npclight" ) )
 	{

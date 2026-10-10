@@ -128,6 +128,10 @@ public:
 
 	Class_T			Classify( void );
 	bool			IsElite() { return m_fIsElite; }
+	float			StealthDarkRate( void );	// OF2
+	virtual void	OF2_SetAmbientLight( float flLight )	{ m_Flashlight.SetAmbientLight( flLight ); }	// OF2
+	virtual void	UpdateOnRemove( void );	// OF2
+	void			InputSetFlashlightMode( inputdata_t &inputdata );	// OF2
 	virtual bool	TakesFallDamage( void ) { return true; }	// OF2
 #ifdef MAPBASE
 	bool			IsAltFireCapable();
@@ -310,6 +314,7 @@ private:
 		TASK_COMBINE_STEALTH_GET_SEARCH_PATH,
 		TASK_COMBINE_STEALTH_GET_PATH_HOME,
 		TASK_COMBINE_STEALTH_FACE_HOME,
+		TASK_COMBINE_STEALTH_FACE_SEARCH,
 		NEXT_TASK
 	};
 
@@ -404,6 +409,8 @@ private:
 #endif
 
 	COF2Awareness				m_Stealth;			// OF2
+	COF2Flashlight	m_Flashlight;		// OF2: head flashlight, for those without night vision
+	int				m_iFlashlightMode;	// "of2_flashlight": 0 never, 1 where it is dark, 2 always
 	bool						m_bStealthDisabled;	// OF2: "of2_nostealth" in the map
 
 public:

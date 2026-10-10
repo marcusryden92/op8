@@ -22,7 +22,7 @@
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
-#define CURVE_MAX_SMOOTH	8
+#define CURVE_MAX_SMOOTH	16
 // A texture stretched once over the whole length stops this short of its ends
 #define CURVE_TEXTURE_INSET	0.03f
 // A bend over an edge is drawn as a curve of this many pieces
@@ -637,6 +637,20 @@ void OF2_DrawCurve( const Vector *pPoints, const bool *pBend, int nPoints, const
 		}
 	}
 
+	bool bCut = false;
+	if ( style.flDrawLength > 0.0f )
+	{
+		for ( int i = 1; i < nCount - 1; i++ )
+		{
+			if ( flAlong[i] >= style.flDrawLength )
+			{
+				nCount = i + 1;
+				bCut = true;
+				break;
+			}
+		}
+	}
+
 	if ( style.bTube )
 	{
 		// One circle, at the very end: the round ending. (More of them along
@@ -644,7 +658,7 @@ void OF2_DrawCurve( const Vector *pPoints, const bool *pBend, int nPoints, const
 		// strip runs through it at a slant, and half of each disc came out in
 		// front of the strip.)
 		int iDisc = nCount - 1;
-		DrawTube( style.pMaterial, vecPos, vecColor, flBox, flTexCoord, flRadius, nCount, style, &iDisc, bTip ? 1 : 0 );
+		DrawTube( style.pMaterial, vecPos, vecColor, flBox, flTexCoord, flRadius, nCount, style, &iDisc, ( bTip && !bCut ) ? 1 : 0 );
 	}
 	else
 	{

@@ -17,6 +17,11 @@ struct VS_OUTPUT
 {
 	float4 projPos		: POSITION;
 	float3 worldPos		: TEXCOORD0;
+	// What turns a place in the world into its depth on screen (z and w), the
+	// same for every point: the pixel shader works out the depth of where the
+	// light starts with them
+	float4 depthZ		: TEXCOORD1;
+	float4 depthW		: TEXCOORD2;
 };
 
 VS_OUTPUT main( const VS_INPUT v )
@@ -26,6 +31,8 @@ VS_OUTPUT main( const VS_INPUT v )
 	float3 worldPos = mul( float4( v.vPos.xyz, 1.0f ), cModel[0] );
 	o.projPos = mul( float4( worldPos, 1.0f ), cViewProj );
 	o.worldPos = worldPos;
+	o.depthZ = float4( cViewProj[0].z, cViewProj[1].z, cViewProj[2].z, cViewProj[3].z );
+	o.depthW = float4( cViewProj[0].w, cViewProj[1].w, cViewProj[2].w, cViewProj[3].w );
 
 	return o;
 }

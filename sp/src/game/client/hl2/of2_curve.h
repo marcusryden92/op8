@@ -12,7 +12,7 @@
 #pragma once
 #endif
 
-#define OF2_CURVE_MAX_POINTS	128
+#define OF2_CURVE_MAX_POINTS	512
 
 struct OF2CurveStyle_t
 {
@@ -35,6 +35,7 @@ struct OF2CurveStyle_t
 		flTipLength = 0.0f;
 		flTipShade = 1.0f;
 		flBendRadius = 0.0f;
+		flDrawLength = 0.0f;
 	}
 
 	IMaterial	*pMaterial;
@@ -75,6 +76,10 @@ struct OF2CurveStyle_t
 	// Where it goes over an edge (pBend) it is drawn going round, starting and
 	// ending this far either side of the point. 0 turns on the spot.
 	float		flBendRadius;
+
+	// Only this much of it is drawn, from the first point, looking as that
+	// part of the whole does. 0 draws all of it.
+	float		flDrawLength;
 };
 
 // pBend marks the points where it goes over an edge: the curve runs straight

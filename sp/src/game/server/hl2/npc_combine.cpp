@@ -51,7 +51,8 @@ ConVar npc_combine_altfire_not_allies_only( "npc_combine_altfire_not_allies_only
 ConVar npc_combine_new_cover_behavior( "npc_combine_new_cover_behavior", "1", FCVAR_NONE, "Mapbase: Toggles small patches for parts of npc_combine AI related to soldiers failing to take cover. These patches are minimal and only change cases where npc_combine would otherwise look at an enemy without shooting or run up to the player to melee attack when they don't have to. Consult the Mapbase wiki for more information." );
 
 // OF2: Stealth. The rest of its convars are in of2_stealth.cpp.
-ConVar of2_stealth_dark_soldier( "of2_stealth_dark_soldier", "1.0", FCVAR_NONE, "Stealth: how fast soldiers and elites make out a player in complete darkness, against one in the light. 1: they have night vision, light makes no difference. 0: they cannot see into the dark at all." );
+ConVar of2_stealth_dark_soldier( "of2_stealth_dark_soldier", "0", FCVAR_NONE, "Stealth: how fast ordinary soldiers make out a player in complete darkness, against one in the light. 0: they cannot see into the dark at all (of2_stealth_blind), and lose sight of a player who steps into it. 1: as if they had night vision." );
+ConVar of2_stealth_dark_elite( "of2_stealth_dark_elite", "1.0", FCVAR_NONE, "Stealth: the same for elites. 1: they have night vision, light makes no difference." );
 
 ConVar npc_combine_fixed_shootpos("npc_combine_fixed_shootpos", "0", FCVAR_NONE, "Mapbase: Toggles fixed Combine soldier shoot position." );
 #endif
@@ -252,6 +253,9 @@ DEFINE_KEYFIELD( m_iPathfindingVariant, FIELD_INTEGER, "pathfindingvariant" ),
 
 // OF2: Stealth
 DEFINE_EMBEDDED( m_Stealth ),
+DEFINE_EMBEDDED( m_Flashlight ),
+DEFINE_KEYFIELD( m_iFlashlightMode, FIELD_INTEGER, "of2_flashlight" ),
+DEFINE_INPUTFUNC( FIELD_INTEGER, "SetFlashlightMode", InputSetFlashlightMode ),
 DEFINE_KEYFIELD( m_bStealthDisabled, FIELD_BOOLEAN, "of2_nostealth" ),
 DEFINE_INPUTFUNC( FIELD_VOID,	"EnableStealth",	InputEnableStealth ),
 DEFINE_INPUTFUNC( FIELD_VOID,	"DisableStealth",	InputDisableStealth ),
@@ -267,7 +271,9 @@ CNPC_Combine::CNPC_Combine()
 	m_vecTossVelocity = vec3_origin;
 
 	// OF2
-	m_Stealth.Init( this );
+	m_Stealth.Init( this, &m_Flashlight );
+	m_Flashlight.Init( this );
+	m_iFlashlightMode = 1;
 	m_bStealthDisabled = false;
 }
 
@@ -445,6 +451,8 @@ void CNPC_Combine::InputSetPoliceGoal( inputdata_t &inputdata )
 //-----------------------------------------------------------------------------
 void CNPC_Combine::Precache()
 {
+	COF2Flashlight::Precache();	// OF2
+
 	PrecacheModel("models/Weapons/w_grenade.mdl");
 	UTIL_PrecacheOther( "npc_handgrenade" );
 
@@ -577,11 +585,53 @@ void CNPC_Combine::GatherConditions()
 
 	// OF2: Stealth. Soldiers that only react to a spotlight (no look) are left alone.
 	m_Stealth.SetDisabled( m_bStealthDisabled || HasSpawnFlags( SF_COMBINE_NO_LOOK ) );
-	m_Stealth.SetVision( of2_stealth_dark_soldier.GetFloat(), true );
+	// The head flashlight, for those without night vision (elites only wear it if told to:
+	// "of2_flashlight" 2). What is dark and unlit, they cannot see to be empty.
+	bool bNightVision = StealthDarkRate() > 0.0f;
+	m_bOF2WantsLight = m_Flashlight.Update( ( bNightVision && m_iFlashlightMode == 1 ) ? 0 : m_iFlashlightMode,
+		GetEnemy() != NULL || ( m_Stealth.IsEnabled() && m_Stealth.State() != AWARE_UNAWARE ) );
+	m_Stealth.SetVision( StealthDarkRate(), bNightVision || m_Flashlight.IsSpotLit() );
 	m_Stealth.Update();
+	m_Stealth.UpdateFormation( m_FollowBehavior );
+	switch ( m_Stealth.TakeCrouch() )
+	{
+	case 1:
+		// Down to look into a tunnel or under something
+		Crouch();
+		if ( !IsMoving() )
+		{
+			ResetIdealActivity( ACT_IDLE );
+		}
+		break;
+
+	case -1:
+		if ( Stand() && !GetEnemy() && !IsMoving() )
+		{
+			ResetIdealActivity( ACT_IDLE );
+		}
+		break;
+	}
 	if ( m_Stealth.HasChanged() )
 	{
 		SetCondition( COND_COMBINE_STEALTH_STIMULUS );
+	}
+	if ( m_Stealth.TakeSaidClear() )
+	{
+		// Searching with the others: that was the last of a room
+#ifdef COMBINE_SOLDIER_USES_RESPONSE_SYSTEM
+		SpeakIfAllowed( TLK_CMB_ANSWER, "combinequestion:1" );
+#else
+		m_Sentences.Speak( "COMBINE_CLEAR" );
+#endif
+	}
+	if ( m_Stealth.TakeFoundBody() )
+	{
+		// Come across one of its own dead: the line it did not get to say when it happened
+#ifdef COMBINE_SOLDIER_USES_RESPONSE_SYSTEM
+		SpeakIfAllowed( TLK_CMB_MANDOWN );
+#else
+		m_Sentences.Speak( "COMBINE_MAN_DOWN" );
+#endif
 	}
 
 	ClearCondition( COND_COMBINE_ATTACK_SLOT_AVAILABLE );
@@ -1281,6 +1331,7 @@ void CNPC_Combine::StartTask( const Task_t *pTask )
 	case TASK_COMBINE_STEALTH_GET_SEARCH_PATH:		m_Stealth.StartTask( STEALTH_TASK_GET_SEARCH_PATH );		break;
 	case TASK_COMBINE_STEALTH_GET_PATH_HOME:		m_Stealth.StartTask( STEALTH_TASK_GET_PATH_HOME );			break;
 	case TASK_COMBINE_STEALTH_FACE_HOME:			if ( m_Stealth.StartTask( STEALTH_TASK_FACE_HOME ) ) ChainStartTask( TASK_FACE_IDEAL );				break;
+	case TASK_COMBINE_STEALTH_FACE_SEARCH:			if ( m_Stealth.StartTask( STEALTH_TASK_FACE_SEARCH ) ) ChainStartTask( TASK_FACE_IDEAL );			break;
 
 	default:
 		BaseClass:: StartTask( pTask );
@@ -1323,6 +1374,7 @@ void CNPC_Combine::RunTask( const Task_t *pTask )
 	// OF2: Stealth
 	case TASK_COMBINE_STEALTH_FACE_STIMULUS:
 	case TASK_COMBINE_STEALTH_FACE_HOME:
+	case TASK_COMBINE_STEALTH_FACE_SEARCH:
 		ChainRunTask( TASK_FACE_IDEAL );
 		break;
 
@@ -1479,6 +1531,17 @@ Vector CNPC_Combine::BodyTarget( const Vector &posSrc, bool bNoisy )
 //------------------------------------------------------------------------------
 bool CNPC_Combine::FVisible( CBaseEntity *pEntity, int traceMask, CBaseEntity **ppBlocker )
 {
+	// OF2: Stealth. Only elites have night vision: an ordinary soldier cannot see a player
+	// who is in the dark, one it was fighting included (as the metrocops).
+	if ( pEntity && pEntity->IsPlayer() && m_Stealth.IsPlayerHidden( static_cast<CBasePlayer *>( pEntity ), StealthDarkRate() ) )
+	{
+		if ( ppBlocker )
+		{
+			*ppBlocker = NULL;
+		}
+		return false;
+	}
+
 	if( m_spawnflags & SF_COMBINE_NO_LOOK )
 	{
 		// When no look is set, if enemy has eluded the squad, 
@@ -1495,6 +1558,12 @@ bool CNPC_Combine::FVisible( CBaseEntity *pEntity, int traceMask, CBaseEntity **
 //-----------------------------------------------------------------------------
 void CNPC_Combine::Event_Killed( const CTakeDamageInfo &info )
 {
+	// OF2: Stealth. A body for the others to come across
+	OF2_BodyAdd( this, info );
+
+	// OF2: The light goes out with the soldier
+	m_Flashlight.Remove();
+
 	// if I was killed before I could finish throwing my grenade, drop
 	// a grenade item that the player can retrieve.
 	if( GetActivity() == ACT_RANGE_ATTACK2 )
@@ -1569,6 +1638,30 @@ bool CNPC_Combine::UpdateEnemyMemory( CBaseEntity *pEnemy, const Vector &positio
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: OF2: The head flashlight (COF2Flashlight, of2_stealth.cpp)
+//-----------------------------------------------------------------------------
+void CNPC_Combine::InputSetFlashlightMode( inputdata_t &inputdata )
+{
+	m_iFlashlightMode = inputdata.value.Int();
+}
+
+void CNPC_Combine::UpdateOnRemove( void )
+{
+	m_Flashlight.Remove();
+
+	BaseClass::UpdateOnRemove();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: OF2: Stealth. How well it sees into the dark (the user's rule: only
+//			elites have night vision).
+//-----------------------------------------------------------------------------
+float CNPC_Combine::StealthDarkRate( void )
+{
+	return IsElite() ? of2_stealth_dark_elite.GetFloat() : of2_stealth_dark_soldier.GetFloat();
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: OF2: Stealth. The player is not seen until the soldier is sure of
 //			what it is looking at.
 //-----------------------------------------------------------------------------
@@ -1579,7 +1672,7 @@ bool CNPC_Combine::QuerySeeEntity( CBaseEntity *pEntity, bool bOnlyHateOrFearIfN
 
 	if ( pEntity->IsPlayer() )
 	{
-		return m_Stealth.SeePlayer( static_cast<CBasePlayer *>( pEntity ), of2_stealth_dark_soldier.GetFloat() );
+		return m_Stealth.SeePlayer( static_cast<CBasePlayer *>( pEntity ), StealthDarkRate() );
 	}
 
 	return true;
@@ -3428,6 +3521,10 @@ void CNPC_Combine::AlertSound( void)
 //=========================================================
 void CNPC_Combine::NotifyDeadFriend ( CBaseEntity* pFriend )
 {
+	// OF2: Stealth. Only one who saw it, or is alerted already, knows and says so
+	if ( !m_Stealth.WitnessDeath( pFriend ) )
+		return;
+
 #ifndef COMBINE_SOLDIER_USES_RESPONSE_SYSTEM
 	if ( GetSquad()->NumMembers() < 2 )
 	{
@@ -4197,6 +4294,7 @@ DECLARE_TASK( TASK_COMBINE_STEALTH_ARRIVED )
 DECLARE_TASK( TASK_COMBINE_STEALTH_GET_SEARCH_PATH )
 DECLARE_TASK( TASK_COMBINE_STEALTH_GET_PATH_HOME )
 DECLARE_TASK( TASK_COMBINE_STEALTH_FACE_HOME )
+DECLARE_TASK( TASK_COMBINE_STEALTH_FACE_SEARCH )
 
 //Activities
 #if !SHARED_COMBINE_ACTIVITIES
@@ -5055,6 +5153,7 @@ DEFINE_SCHEDULE
  "		TASK_COMBINE_STEALTH_GET_SEARCH_PATH	0"
  "		TASK_WAIT_FOR_MOVEMENT					0"
  "		TASK_STOP_MOVING						0"
+ "		TASK_COMBINE_STEALTH_FACE_SEARCH		0"
  "		TASK_SET_ACTIVITY						ACTIVITY:ACT_IDLE"
  "		TASK_WAIT								1"
  "		TASK_TURN_LEFT							120"

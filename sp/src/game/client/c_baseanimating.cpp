@@ -3498,9 +3498,13 @@ void C_BaseAnimating::DoInternalDrawModel( ClientModelRenderInfo_t *pInfo, DrawM
 }
 
 
+#ifdef HL2_EPISODIC
+float OF2_DisplacerWhiten( C_BaseEntity *pEntity );	// OF2: hl2/c_weapon_displacer.cpp
+#endif
+
 //-----------------------------------------------------------------------------
 // Purpose: Draws the object
-// Input  : flags - 
+// Input  : flags -
 //-----------------------------------------------------------------------------
 int C_BaseAnimating::InternalDrawModel( int flags )
 {
@@ -3576,6 +3580,30 @@ int C_BaseAnimating::InternalDrawModel( int flags )
 	}
 
 	DoInternalDrawModel( pInfo, ( bMarkAsDrawn && ( pInfo->flags & STUDIO_RENDER ) ) ? &state : NULL, pBoneToWorld );
+
+#ifdef HL2_EPISODIC
+	// OF2: Something the Displacer is taking is drawn over itself in flat white, more and
+	// more, until only its silhouette is left (c_weapon_displacer.cpp). Render color could
+	// only darken it, which is how the Combine ball gets its black one.
+	if ( bMarkAsDrawn && ( pInfo->flags & STUDIO_RENDER ) &&
+		!( pInfo->flags & ( STUDIO_SHADOWDEPTHTEXTURE | STUDIO_SSAODEPTHTEXTURE ) ) )
+	{
+		float flWhite = OF2_DisplacerWhiten( this );
+		if ( flWhite > 0.0f )
+		{
+			IMaterial *pWhite = materials->FindMaterial( "effects/of2_displacer_white", TEXTURE_GROUP_OTHER );
+			if ( !IsErrorMaterial( pWhite ) )
+			{
+				float flOldBlend = render->GetBlend();
+				render->SetBlend( flWhite );
+				modelrender->ForcedMaterialOverride( pWhite );
+				modelrender->DrawModelExecute( state, *pInfo, pBoneToWorld );
+				modelrender->ForcedMaterialOverride( NULL );
+				render->SetBlend( flOldBlend );
+			}
+		}
+	}
+#endif
 
 	OnPostInternalDrawModel( pInfo );
 

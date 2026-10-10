@@ -75,6 +75,8 @@
 
 //#define MANHACK_GLOW_SPRITE	"sprites/laserdot.vmt"
 #define MANHACK_GLOW_SPRITE	"sprites/glow1.vmt"
+// OF2: eye and light of a manhack on the player's side (it was green)
+#define MANHACK_FRIENDLY_GLOW_COLOR	120, 200, 255
 
 #define	MANHACK_CHARGE_MIN_DIST	200
 
@@ -2501,8 +2503,8 @@ void CNPC_Manhack::StartEye( void )
 		
 		if( m_bHackedByAlyx )
 		{
-			m_pEyeGlow->SetTransparency( kRenderTransAdd, 0, 255, 0, 128, kRenderFxNoDissipation );
-			m_pEyeGlow->SetColor( 0, 255, 0 );
+			m_pEyeGlow->SetTransparency( kRenderTransAdd, MANHACK_FRIENDLY_GLOW_COLOR, 128, kRenderFxNoDissipation );
+			m_pEyeGlow->SetColor( MANHACK_FRIENDLY_GLOW_COLOR );
 		}
 		else
 		{
@@ -2523,8 +2525,8 @@ void CNPC_Manhack::StartEye( void )
 
 		if( m_bHackedByAlyx )
 		{
-			m_pLightGlow->SetTransparency( kRenderTransAdd, 0, 255, 0, 128, kRenderFxNoDissipation );
-			m_pLightGlow->SetColor( 0, 255, 0 );
+			m_pLightGlow->SetTransparency( kRenderTransAdd, MANHACK_FRIENDLY_GLOW_COLOR, 128, kRenderFxNoDissipation );
+			m_pLightGlow->SetColor( MANHACK_FRIENDLY_GLOW_COLOR );
 		}
 		else
 		{
@@ -3328,7 +3330,7 @@ void CNPC_Manhack::SetEyeState( int state )
 				//Toggle our state
 				if( m_bHackedByAlyx )
 				{
-					m_pEyeGlow->SetColor( 0, 255, 0 );
+					m_pEyeGlow->SetColor( MANHACK_FRIENDLY_GLOW_COLOR );
 				}
 				else
 				{
@@ -3344,7 +3346,7 @@ void CNPC_Manhack::SetEyeState( int state )
 			{
 				if( m_bHackedByAlyx )
 				{
-					m_pLightGlow->SetColor( 0, 255, 0 );
+					m_pLightGlow->SetColor( MANHACK_FRIENDLY_GLOW_COLOR );
 				}
 				else
 				{

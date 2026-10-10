@@ -1,4 +1,18 @@
-//========= Opposing Force 2 ==================================================//
+		if ( !pszShader )
+			continue;
+
+		const OF2WorldShader_t *pShader = NULL;
+		for ( int i = 0; i < ARRAYSIZE( s_WorldShaders ); i++ )
+		{
+			const OF2WorldShader_t &shader = s_WorldShaders[i];
+			if ( bFixed ? ( !Q_stricmp( pszShader, shader.pszStock ) || !Q_stricmp( pszShader, shader.pszStockLoaded ) ) : !Q_stricmp( pszShader, shader.pszFixed ) )
+			{
+				pShader = &shader;
+				break;
+			}
+		}
+
+		if ( !pShader || s_Skipped//========= Opposing Force 2 ==================================================//
 //
 // Purpose: OF2: Puts world materials on OF2_LightmappedGeneric, the mod's copy
 //			of the engine's brush shader whose flashlight pass does not shine
@@ -24,13 +38,26 @@
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
 
-#define WORLDSHADER_STOCK		"LightmappedGeneric"
-#define WORLDSHADER_FIXED		"OF2_LightmappedGeneric"
+// The engine's shader as a material file names it, the name a loaded material reports
+// for it (a fallback's, where it differs), and the mod's copy. Brushes, and
+// displacement blends.
+struct OF2WorldShader_t
+{
+	const char *pszStock;
+	const char *pszStockLoaded;
+	const char *pszFixed;
+};
+
+static const OF2WorldShader_t s_WorldShaders[] =
+{
+	{ "LightmappedGeneric",		"LightmappedGeneric",			"OF2_LightmappedGeneric" },
+	{ "WorldVertexTransition",	"WorldVertexTransition_DX9",	"OF2_WorldVertexTransition" },
+};
 #define WORLDSHADER_INTERVAL	5.0f	// seconds between looks for materials loaded since
 
 static void OF2WorldShaderChanged( IConVar *pConVar, const char *pOldValue, float flOldValue );
 
-static ConVar of2_worldshader( "of2_worldshader", "1", FCVAR_NONE, "1: world brushes are drawn with OF2_LightmappedGeneric, whose flashlight pass does not shine backwards (needed for of2_police_flashlight_projected). 0: the engine's own shader.", OF2WorldShaderChanged );
+static ConVar of2_worldshader( "of2_worldshader", "1", FCVAR_NONE, "1: world brushes and displacements are drawn with OF2_LightmappedGeneric / OF2_WorldVertexTransition, whose flashlight pass does not shine backwards (needed for of2_police_flashlight_projected). 0: the engine's own shader.", OF2WorldShaderChanged );
 
 //-----------------------------------------------------------------------------
 // Purpose: A material's file, with a "patch" material (what vbsp bakes into a
@@ -84,8 +111,6 @@ static CUtlDict< bool, int > s_Skipped;
 //-----------------------------------------------------------------------------
 static int OF2_SwapWorldShader( bool bFixed )
 {
-	const char *pszFrom = bFixed ? WORLDSHADER_STOCK : WORLDSHADER_FIXED;
-	const char *pszTo = bFixed ? WORLDSHADER_FIXED : WORLDSHADER_STOCK;
 	int nSwapped = 0;
 
 	for ( MaterialHandle_t h = materials->FirstMaterial(); h != materials->InvalidMaterial(); h = materials->NextMaterial( h ) )
@@ -97,7 +122,21 @@ static int OF2_SwapWorldShader( bool bFixed )
 			continue;
 
 		const char *pszShader = pMaterial->GetShaderName();
-		if ( !pszShader || Q_stricmp( pszShader, pszFrom ) || s_Skipped.Find( pMaterial->GetName() ) != s_Skipped.InvalidIndex() )
+		if ( !pszShader )
+			continue;
+
+		const OF2WorldShader_t *pShader = NULL;
+		for ( int i = 0; i < ARRAYSIZE( s_WorldShaders ); i++ )
+		{
+			const OF2WorldShader_t &shader = s_WorldShaders[i];
+			if ( bFixed ? ( !Q_stricmp( pszShader, shader.pszStock ) || !Q_stricmp( pszShader, shader.pszStockLoaded ) ) : !Q_stricmp( pszShader, shader.pszFixed ) )
+			{
+				pShader = &shader;
+				break;
+			}
+		}
+
+		if ( !pShader || s_Skipped.Find( pMaterial->GetName() ) != s_Skipped.InvalidIndex() )
 			continue;
 
 		char szFile[MAX_PATH];
@@ -105,7 +144,7 @@ static int OF2_SwapWorldShader( bool bFixed )
 
 		// Its file says the stock shader either way
 		KeyValues *pKeys = OF2_LoadMaterialKeys( szFile );
-		if ( !pKeys || Q_stricmp( pKeys->GetName(), WORLDSHADER_STOCK ) )
+		if ( !pKeys || Q_stricmp( pKeys->GetName(), pShader->pszStock ) )
 		{
 			if ( pKeys )
 			{
@@ -115,7 +154,7 @@ static int OF2_SwapWorldShader( bool bFixed )
 			continue;
 		}
 
-		pKeys->SetName( pszTo );
+		pKeys->SetName( bFixed ? pShader->pszFixed : pShader->pszStock );
 		pMaterial->SetShaderAndParams( pKeys );
 		pKeys->deleteThis();
 		nSwapped++;
@@ -130,7 +169,7 @@ static void OF2WorldShaderChanged( IConVar *pConVar, const char *pOldValue, floa
 		return;
 
 	int nSwapped = OF2_SwapWorldShader( of2_worldshader.GetBool() );
-	Msg( "of2_worldshader: %d materials now on %s\n", nSwapped, of2_worldshader.GetBool() ? WORLDSHADER_FIXED : WORLDSHADER_STOCK );
+	Msg( "of2_worldshader: %d materials now on %s\n", nSwapped, of2_worldshader.GetBool() ? "the mod's world shaders" : "the engine's" );
 }
 
 //-----------------------------------------------------------------------------
@@ -164,7 +203,7 @@ public:
 		int nSwapped = OF2_SwapWorldShader( true );
 		if ( nSwapped )
 		{
-			DevMsg( "of2_worldshader: %d materials moved to %s\n", nSwapped, WORLDSHADER_FIXED );
+			DevMsg( "of2_worldshader: %d materials moved to %s\n", nSwapped, "the mod's world shaders" );
 		}
 	}
 

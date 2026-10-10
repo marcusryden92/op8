@@ -1349,6 +1349,20 @@ static ConVar of2_tether_weapon_forward( "of2_tether_weapon_forward", "20", FCVA
 static ConVar of2_tether_weapon_right( "of2_tether_weapon_right", "9", FCVAR_REPLICATED, "How far to the right of the eyes a tether coming out of the held weapon is drawn from." );
 static ConVar of2_tether_weapon_down( "of2_tether_weapon_down", "11", FCVAR_REPLICATED, "How far below the eyes a tether coming out of the held weapon is drawn from." );
 
+#ifndef CLIENT_DLL
+//-----------------------------------------------------------------------------
+// The Barnacle in the hand is a model only the client has. It says where the
+// mouth is (c_of2_tongue.cpp, "of2_tether_mouth"), and the tongue is held from
+// there: the user asked for the line and the points to start at the model.
+//-----------------------------------------------------------------------------
+void OF2_SetTetherWeaponOffset( float flForward, float flRight, float flDown )
+{
+	of2_tether_weapon_forward.SetValue( clamp( flForward, 4.0f, 96.0f ) );
+	of2_tether_weapon_right.SetValue( clamp( flRight, -64.0f, 64.0f ) );
+	of2_tether_weapon_down.SetValue( clamp( flDown, -64.0f, 64.0f ) );
+}
+#endif
+
 //-----------------------------------------------------------------------------
 // The same point from the eyes (bAtWeapon) or from the feet (otherwise), for
 // a player looking along angEyes

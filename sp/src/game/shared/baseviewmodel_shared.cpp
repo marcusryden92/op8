@@ -521,7 +521,17 @@ void CBaseViewModel::CalcViewModelView( CBasePlayer *owner, const Vector& eyePos
 		AngleVectors( vmangles, &vecForward, &vecRight, &vecUp );
 
 		vmorigin += vecForward * vecOffset.x + vecRight * vecOffset.y + vecUp * vecOffset.z;
-		vmangles += angOffset;
+
+		// The turn is about the viewmodel's own axes too. Added onto the view's angles it was
+		// about the world's up for yaw, so looking up or down yaw and roll became the same turn.
+		if ( angOffset != vec3_angle )
+		{
+			matrix3x4_t matView, matOffset, matPlaced;
+			AngleMatrix( vmangles, matView );
+			AngleMatrix( angOffset, matOffset );
+			ConcatTransforms( matView, matOffset, matPlaced );
+			MatrixAngles( matPlaced, vmangles );
+		}
 
 		// ...and its size. Every weapon shares the one viewmodel entity, so this is set for each.
 		float flScale = of2_viewmodel_scale.GetFloat() * ( pWeapon ? pWeapon->GetWpnData().m_flViewmodelScale : 1.0f );
@@ -531,6 +541,12 @@ void CBaseViewModel::CalcViewModelView( CBasePlayer *owner, const Vector& eyePos
 			SetModelScale( flScale );
 		}
 	}
+
+#ifdef HL2_EPISODIC
+	// OF2: the Barnacle is posed further by what its tongue is doing (hl2\c_of2_tongue.cpp)
+	extern void OF2_BarnacleViewModelPose( C_BasePlayer *pOwner, C_BaseViewModel *pViewModel, const Vector &vecEye, const QAngle &angEyes, Vector &vecOrigin, QAngle &angles );
+	OF2_BarnacleViewModelPose( owner, this, eyePosition, eyeAngles, vmorigin, vmangles );
+#endif
 
 	if( UseVR() )
 	{

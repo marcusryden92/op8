@@ -35,6 +35,8 @@ ConVar of2_knife_slash_recover( "of2_knife_slash_recover", "0.05", FCVAR_NONE, "
 ConVar of2_knife_stab_delay( "of2_knife_stab_delay", "0.45", FCVAR_NONE, "Seconds from the start of a knife stab to the hit." );
 ConVar of2_knife_stab_recover( "of2_knife_stab_recover", "0.3", FCVAR_NONE, "Seconds from a knife stab's hit to the next attack." );
 
+ConVar of2_knife_draw_time( "of2_knife_draw_time", "0.2", FCVAR_NONE, "Seconds from bringing the knife out to the first attack (never longer than its draw animation)." );
+
 // Melee pushes by the damage, so at full push the stab shoves like five crowbar hits and
 // sends bodies flying. 0.2 makes a stab push like one crowbar hit.
 ConVar of2_knife_push( "of2_knife_push", "0.2", FCVAR_NONE, "How hard the knife pushes what it hits (bodies included), as a fraction of the usual melee push for its damage." );
@@ -109,7 +111,26 @@ bool CWeaponKnife::Deploy( void )
 {
 	m_bStab = false;
 
-	return BaseClass::Deploy();
+	if ( !BaseClass::Deploy() )
+		return false;
+
+	// The base class holds every attack until the draw animation is over. The knife is
+	// for a quick kill, so it can cut sooner; the swing then takes over from the draw.
+	float flReady = gpGlobals->curtime + MAX( of2_knife_draw_time.GetFloat(), 0.0f );
+
+	if ( flReady < m_flNextPrimaryAttack )
+	{
+		m_flNextPrimaryAttack = m_flNextSecondaryAttack = flReady;
+
+		CBasePlayer *pOwner = ToBasePlayer( GetOwner() );
+
+		if ( pOwner != NULL )
+		{
+			pOwner->SetNextAttack( flReady );
+		}
+	}
+
+	return true;
 }
 
 //-----------------------------------------------------------------------------

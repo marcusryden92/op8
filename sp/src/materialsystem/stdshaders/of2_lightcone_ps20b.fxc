@@ -7,7 +7,17 @@
 // added up along it. The air is brightest on the cone's axis and has none at
 // its edge, and thins out from the lamp to the end of its reach.
 //
+// With SHADOWMAP the lamp is a projected light with a shadow depth map, and
+// each step along the line of sight asks that map whether the lamp reaches it:
+// the light stops at whatever it lands on, whatever its shape, and things cast
+// shadows through it. Without, the client's four planes do what they can.
+//
 //=============================================================================//
+
+// How this card compares against a depth texture: 0 does it in the sampler
+// (and smooths), 1 and 2 hand back the depth
+// STATIC: "FLASHLIGHTDEPTHFILTERMODE"	"0..2"
+// DYNAMIC: "SHADOWMAP"					"0..1"
 
 #include "common_ps_fxc.h"
 
@@ -25,21 +35,41 @@ const float4 g_vColor		: register( c3 );
 // dot( normal, point ) >= distance.
 const float4 g_vPlanes[4]	: register( c4 );
 const float4 g_vEyePos		: register( c8 );
+// World to the lamp's shadow map, a row each: x, y and depth, all over w
+const float4 g_vShadow[4]	: register( c9 );
 
+sampler ShadowSampler		: register( s0 );
+
+// (With the shadow map sixteen steps do not fit in a ps_2_b shader)
+#if SHADOWMAP
+#define NUM_STEPS	12
+#else
 #define NUM_STEPS	16
+#endif
 #define FAR_AWAY	100000.0f
 
 struct PS_INPUT
 {
 	float3 worldPos		: TEXCOORD0;
+	float4 depthZ		: TEXCOORD1;
+	float4 depthW		: TEXCOORD2;
 };
+
+struct PS_OUTPUT
+{
+	float4 color		: COLOR0;
+	float depth			: DEPTH;
+};
+
+// Closer to the eye than this, the light counts as right in front of it
+#define NEAR_DEPTH	8.0f
 
 float NotZero( float f )
 {
 	return ( abs( f ) < 0.00001f ) ? ( ( f < 0.0f ) ? -0.00001f : 0.00001f ) : f;
 }
 
-float4 main( PS_INPUT i ) : COLOR
+PS_OUTPUT main( PS_INPUT i )
 {
 	float3 vDir = normalize( i.worldPos - g_vEyePos.xyz );
 	float3 vFromApex = g_vEyePos.xyz - g_vApex.xyz;
@@ -106,6 +136,14 @@ float4 main( PS_INPUT i ) : COLOR
 
 	float flLength = max( flEnd - flStart, 0.0f );
 
+#if SHADOWMAP
+	// Where on the lamp's shadow map a point t along the line of sight is:
+	// vShadowEye + t * vShadowDir
+	float4 vEye = float4( g_vEyePos.xyz, 1.0f );
+	float4 vShadowEye = float4( dot( vEye, g_vShadow[0] ), dot( vEye, g_vShadow[1] ), dot( vEye, g_vShadow[2] ), dot( vEye, g_vShadow[3] ) );
+	float4 vShadowDir = float4( dot( vDir, g_vShadow[0].xyz ), dot( vDir, g_vShadow[1].xyz ), dot( vDir, g_vShadow[2].xyz ), dot( vDir, g_vShadow[3].xyz ) );
+#endif
+
 	// Add up the light along that stretch
 	float flSum = 0.0f;
 	for ( int s = 0; s < NUM_STEPS; s++ )
@@ -122,10 +160,32 @@ float4 main( PS_INPUT i ) : COLOR
 		float flNear = saturate( 1.0f - ( flZ - g_vApex.w ) / g_vAxis.w );
 
 		// The same light spread over a wider and wider circle
-		flSum += pow( flIn, g_vShape.w ) * pow( flNear, g_vShape.z ) / flZ;
+		float flLight = pow( flIn, g_vShape.w ) * pow( flNear, g_vShape.z ) / flZ;
+
+#if SHADOWMAP
+		// Does the lamp reach this far, or is something in the way?
+		float4 vShadow = vShadowEye + vShadowDir * flT;
+#if FLASHLIGHTDEPTHFILTERMODE == 0
+		flLight *= tex2Dproj( ShadowSampler, vShadow ).x;
+#else
+		flLight *= ( tex2Dproj( ShadowSampler, vShadow ).x * vShadow.w > vShadow.z ) ? 1.0f : 0.0f;
+#endif
+#endif
+
+		flSum += flLight;
 	}
 
 	float3 vResult = g_vColor.rgb * ( flSum * flLength / NUM_STEPS );
 
-	return FinalOutput( float4( vResult, 1.0f ), 0.0f, PIXEL_FOG_TYPE_NONE, TONEMAP_SCALE_LINEAR );
+	PS_OUTPUT o;
+	o.color = FinalOutput( float4( vResult, 1.0f ), 0.0f, PIXEL_FOG_TYPE_NONE, TONEMAP_SCALE_LINEAR );
+
+	// The pixel's depth is that of the place the light starts at, not of the
+	// cone's hull, which reaches through walls: whatever stands in front of the
+	// light then hides it.
+	float4 vEntry = float4( g_vEyePos.xyz + vDir * flStart, 1.0f );
+	float flW = dot( vEntry, i.depthW );
+	o.depth = ( flW < NEAR_DEPTH ) ? 0.0f : saturate( dot( vEntry, i.depthZ ) / flW );
+
+	return o;
 }

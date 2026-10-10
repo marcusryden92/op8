@@ -32,6 +32,9 @@ public:
 	bool	m_bDestIsTarget;
 	EHANDLE	m_hDestTarget;
 
+	bool	m_bCharging;			// charging to fire; the gun in the hands spins up
+	float	m_flSelfTeleportTime;	// when the player last sent themselves, 0 if never
+
 	// Where the HUD should mark the destination
 	Vector	GetMarkerPosition( void );
 

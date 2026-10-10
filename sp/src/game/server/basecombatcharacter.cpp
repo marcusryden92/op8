@@ -66,6 +66,7 @@ extern ConVar weapon_showproficiency;
 #ifdef HL2_EPISODIC
 // OF2: hl2\weapon_barnacle.cpp
 extern bool OF2_BarnacleWantsCorpses( void );
+extern void OF2_BodyRagdoll( CBaseEntity *pVictim, CBaseEntity *pRagdoll );	// OF2: of2_stealth.cpp
 #endif
 
 ConVar ai_show_hull_attacks( "ai_show_hull_attacks", "0" );
@@ -1717,6 +1718,9 @@ bool CBaseCombatCharacter::BecomeRagdoll( const CTakeDamageInfo &info, const Vec
 		// with their vehicle - for more dramatic death/collisions
 		CBaseEntity *pRagdoll = CreateServerRagdoll( this, m_nForceBone, info2, COLLISION_GROUP_INTERACTIVE_DEBRIS, ShouldFadeServerRagdolls() );
 		FixupBurningServerRagdoll( pRagdoll );
+#ifdef HL2_EPISODIC
+		OF2_BodyRagdoll( this, pRagdoll );	// OF2: Stealth: the body others may find is this from now on
+#endif
 		RemoveDeferred();
 		return true;
 	}

@@ -16,6 +16,11 @@
 #include "c_ai_basenpc.h"
 #include "cliententitylist.h"
 #include "view.h"
+#include "dlight.h"
+#include "iefx.h"
+#include "C_Env_Projected_Texture.h"
+#include "iclientshadowmgr.h"
+#include "materialsystem/itexture.h"
 #include "materialsystem/imaterialvar.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
@@ -155,6 +160,14 @@ static ConVar of2_lightcone_edge( "of2_lightcone_edge", "1.5", FCVAR_NONE, "Flas
 static ConVar of2_lightcone_falloff( "of2_lightcone_falloff", "2", FCVAR_NONE, "Flashlight cone in the air: how quickly it thins out along its length. 1 is evenly, higher keeps the light near the head." );
 static ConVar of2_lightcone_lens( "of2_lightcone_lens", "4", FCVAR_NONE, "Flashlight cone in the air: how wide it is where it starts, from its middle to its edge, in units." );
 static ConVar of2_lightcone_clip( "of2_lightcone_clip", "1", FCVAR_NONE, "Flashlight cone in the air: cut it off at the walls, floor and ceiling it lands on, so that it is not seen from behind them." );
+static ConVar of2_lightcone_shadows( "of2_lightcone_shadows", "1", FCVAR_NONE, "Flashlight cone in the air: where the flashlight is a projected light with shadows, the cone reads its shadow map: it stops at whatever the light lands on, and things cast shadows through it. 0: the cut-off planes of of2_lightcone_clip only." );
+
+// The pool of light where it lands (a flashlight that is not a projected texture)
+static ConVar of2_police_flashlight_pool( "of2_police_flashlight_pool", "600", FCVAR_NONE, "Widest the pool of light gets where a metrocop's flashlight lands: its radius in units." );
+static ConVar of2_police_flashlight_pool_scale( "of2_police_flashlight_pool_scale", "3", FCVAR_NONE, "Radius of the pool of light against the width of the cone where it lands. The pool fades towards its edge, so it looks smaller than its radius." );
+static ConVar of2_police_flashlight_pool_bright( "of2_police_flashlight_pool_bright", "2", FCVAR_NONE, "Brightness of the pool of light, doubling per step. Brighter with a smaller scale gives a flat middle and a quicker edge." );
+static ConVar of2_police_flashlight_pool_edge( "of2_police_flashlight_pool_edge", "0", FCVAR_NONE, "The pool of light is cut off where it is fainter than this (the dlight's minlight), for a harder edge." );
+static ConVar of2_police_flashlight_pool_lift( "of2_police_flashlight_pool_lift", "8", FCVAR_NONE, "How far off the surface the pool's light sits, in units." );
 
 #define LIGHTCONE_MATERIAL			"effects/of2_lightcone"
 #define LIGHTCONE_MATERIAL_INSIDE	"effects/of2_lightcone_inside"
@@ -174,7 +187,11 @@ public:
 		m_flConeFOV = 50.0f;
 		m_flConeLength = 320.0f;
 		m_flConeBrightness = 0.0f;
+		m_flConePool = 0.0f;
 	}
+
+	virtual void	OnDataChanged( DataUpdateType_t updateType );
+	virtual void	ClientThink( void );
 
 	// Nothing of it is a model
 	virtual bool	ShouldDraw( void ) { return !IsDormant(); }
@@ -185,10 +202,12 @@ public:
 
 private:
 	int		FindPlanes( const Vector &vecOrigin, const Vector &vecForward, const Vector &vecRight, const Vector &vecUp, float flLength, float flTan, cplane_t *pPlanes );
+	bool	FindShadowMap( VMatrix *pWorldToShadow, ITexture **ppDepthTexture );
 
 	float	m_flConeFOV;
 	float	m_flConeLength;
 	float	m_flConeBrightness;
+	float	m_flConePool;
 
 	CMaterialReference	m_Material;
 	CMaterialReference	m_MaterialInside;
@@ -198,7 +217,60 @@ IMPLEMENT_CLIENTCLASS_DT( C_OF2LightCone, DT_OF2LightCone, COF2LightCone )
 	RecvPropFloat( RECVINFO( m_flConeFOV ) ),
 	RecvPropFloat( RECVINFO( m_flConeLength ) ),
 	RecvPropFloat( RECVINFO( m_flConeBrightness ) ),
+	RecvPropFloat( RECVINFO( m_flConePool ) ),
 END_RECV_TABLE()
+
+//-----------------------------------------------------------------------------
+// Purpose: The pool of light where the cone lands, for a flashlight that is not
+//			a projected texture: a dlight, put there every frame from where the
+//			cone itself is drawn. (The server used to move a spotlight_end to it
+//			once a think, which trailed well behind the cone.)
+//-----------------------------------------------------------------------------
+void C_OF2LightCone::OnDataChanged( DataUpdateType_t updateType )
+{
+	BaseClass::OnDataChanged( updateType );
+
+	if ( updateType == DATA_UPDATE_CREATED )
+	{
+		SetNextClientThink( CLIENT_THINK_ALWAYS );
+	}
+}
+
+void C_OF2LightCone::ClientThink( void )
+{
+	if ( m_flConePool <= 0.0f || IsDormant() )
+		return;
+
+	Vector vecOrigin = GetAbsOrigin();
+	Vector vecForward;
+	AngleVectors( GetAbsAngles(), &vecForward );
+
+	CTraceFilterWorldOnly filter;
+	trace_t tr;
+	UTIL_TraceLine( vecOrigin, vecOrigin + vecForward * m_flConePool, MASK_OPAQUE, &filter, &tr );
+	if ( tr.fraction == 1.0f || tr.startsolid )
+		return;
+
+	// As wide as the cone is there, times the scale: a dlight fades all the way to its
+	// edge, so it looks smaller than its radius. Brighter with a smaller radius, it has
+	// a flat middle and a quicker edge.
+	float flDist = tr.fraction * m_flConePool;
+	float flRadius = flDist * tan( DEG2RAD( clamp( m_flConeFOV, 1.0f, 170.0f ) * 0.5f ) ) * of2_police_flashlight_pool_scale.GetFloat();
+	flRadius = clamp( flRadius, 24.0f, of2_police_flashlight_pool.GetFloat() );
+
+	dlight_t *pLight = effects->CL_AllocDlight( index );
+	if ( !pLight )
+		return;
+
+	pLight->origin = tr.endpos + tr.plane.normal * of2_police_flashlight_pool_lift.GetFloat();
+	pLight->radius = flRadius;
+	pLight->color.r = 255;
+	pLight->color.g = 250;
+	pLight->color.b = 235;
+	pLight->color.exponent = clamp( of2_police_flashlight_pool_bright.GetInt(), -4, 6 );
+	pLight->minlight = of2_police_flashlight_pool_edge.GetFloat();
+	pLight->die = gpGlobals->curtime + 0.05f;
+}
 
 //-----------------------------------------------------------------------------
 // It can point any way
@@ -263,6 +335,27 @@ int C_OF2LightCone::FindPlanes( const Vector &vecOrigin, const Vector &vecForwar
 	}
 
 	return nPlanes;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: The same NPC's projected light, if that is the kind of light it has
+//			and it has a shadow depth map in this view. Then the shader asks the
+//			map, which knows everything the light lands on.
+//-----------------------------------------------------------------------------
+bool C_OF2LightCone::FindShadowMap( VMatrix *pWorldToShadow, ITexture **ppDepthTexture )
+{
+	C_BaseEntity *pParent = GetMoveParent();
+	if ( !pParent )
+		return false;
+
+	for ( C_BaseEntity *pChild = pParent->FirstMoveChild(); pChild; pChild = pChild->NextMovePeer() )
+	{
+		C_EnvProjectedTexture *pLight = dynamic_cast<C_EnvProjectedTexture *>( pChild );
+		if ( pLight && g_pClientShadowMgr->OF2_GetFlashlightDepth( pLight->OF2_GetLightHandle(), pWorldToShadow, ppDepthTexture ) )
+			return true;
+	}
+
+	return false;
 }
 
 //-----------------------------------------------------------------------------
@@ -335,8 +428,13 @@ int C_OF2LightCone::DrawModel( int flags )
 	if ( !pMaterial || pMaterial->IsErrorMaterial() )
 		return 0;
 
+	// What stops the light: its shadow map if it has one, else the surfaces found by tracing
+	VMatrix matWorldToShadow;
+	ITexture *pDepthTexture = NULL;
+	bool bShadowMap = of2_lightcone_shadows.GetBool() && FindShadowMap( &matWorldToShadow, &pDepthTexture );
+
 	cplane_t planes[LIGHTCONE_PLANES];
-	int nPlanes = of2_lightcone_clip.GetBool() ? FindPlanes( vecOrigin, vecForward, vecRight, vecUp, flLength, flTan, planes ) : 0;
+	int nPlanes = ( !bShadowMap && of2_lightcone_clip.GetBool() ) ? FindPlanes( vecOrigin, vecForward, vecRight, vecUp, flLength, flTan, planes ) : 0;
 
 	// Seen from the side, straight through the middle, this makes it as bright as the
 	// server asked for (less what the soft edge takes), however wide the cone is
@@ -366,6 +464,22 @@ int C_OF2LightCone::DrawModel( int flags )
 			// (Everywhere is in front of this one)
 			pVar->SetVecValue( 0.0f, 0.0f, 0.0f, -1.0f );
 		}
+	}
+
+	pVar = pMaterial->FindVar( "$conedepth", &bFound );
+	if ( bShadowMap )
+	{
+		pVar->SetTextureValue( pDepthTexture );
+
+		static const char *s_pszShadow[4] = { "$coneshadow1", "$coneshadow2", "$coneshadow3", "$coneshadow4" };
+		for ( int i = 0; i < 4; i++ )
+		{
+			pMaterial->FindVar( s_pszShadow[i], &bFound )->SetVecValue( matWorldToShadow[i][0], matWorldToShadow[i][1], matWorldToShadow[i][2], matWorldToShadow[i][3] );
+		}
+	}
+	else
+	{
+		pVar->SetUndefined();
 	}
 
 	// The outside of the cone: its sides and both ends. A little bigger than the light,

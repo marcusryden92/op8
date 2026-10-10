@@ -322,6 +322,13 @@ int C_BaseViewModel::DrawModel( int flags )
 	if ( !m_bReadyToDraw )
 		return 0;
 
+#ifdef HL2_EPISODIC
+	// OF2: the Barnacle is drawn with the world, where its tongue is (hl2\c_of2_tongue.cpp)
+	extern bool OF2_BarnacleSkipViewModelPass( C_BaseViewModel *pViewModel );
+	if ( OF2_BarnacleSkipViewModelPass( this ) )
+		return 0;
+#endif
+
 	if ( flags & STUDIO_RENDER )
 	{
 		// Determine blending amount and tell engine

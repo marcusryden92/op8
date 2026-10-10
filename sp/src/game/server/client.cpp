@@ -1027,6 +1027,30 @@ void CC_Player_BugBaitSwap( void )
 }
 static ConCommand bugswap("bug_swap", CC_Player_BugBaitSwap, "Automatically swaps the current weapon for the bug bait and back again.", FCVAR_CHEAT );
 
+//-----------------------------------------------------------------------------
+// OF2: quickly switch to the Barnacle, or back to the previous weapon (V)
+//-----------------------------------------------------------------------------
+void CC_Player_BarnacleSwap( void )
+{
+	CBasePlayer *pPlayer = ToBasePlayer( UTIL_GetCommandClient() );
+	if ( pPlayer == NULL )
+		return;
+
+	// Tell the client to stop selecting weapons
+	engine->ClientCommand( UTIL_GetCommandClient()->edict(), "cancelselect" );
+
+	CBaseCombatWeapon *pWeapon = pPlayer->GetActiveWeapon();
+	if ( pWeapon && !Q_stricmp( pWeapon->GetName(), "weapon_barnacle" ) )
+	{
+		pPlayer->SelectLastItem();
+	}
+	else
+	{
+		pPlayer->SelectItem( "weapon_barnacle" );
+	}
+}
+static ConCommand barnacleswap("barnacle_swap", CC_Player_BarnacleSwap, "Automatically swaps the current weapon for the Barnacle and back again." );
+
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
 void CC_Player_Use( const CCommand &args )

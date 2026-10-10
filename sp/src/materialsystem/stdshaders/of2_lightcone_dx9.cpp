@@ -25,6 +25,11 @@ BEGIN_VS_SHADER( OF2_LightCone, "Light in the air from a flashlight" )
 		SHADER_PARAM( CONEPLANE2, SHADER_PARAM_TYPE_VEC4, "[0 0 0 -1]", "" )
 		SHADER_PARAM( CONEPLANE3, SHADER_PARAM_TYPE_VEC4, "[0 0 0 -1]", "" )
 		SHADER_PARAM( CONEPLANE4, SHADER_PARAM_TYPE_VEC4, "[0 0 0 -1]", "" )
+		SHADER_PARAM( CONEDEPTH, SHADER_PARAM_TYPE_TEXTURE, "", "The lamp's shadow depth map, set by the client while it has one. With it the planes are not needed." )
+		SHADER_PARAM( CONESHADOW1, SHADER_PARAM_TYPE_VEC4, "[0 0 0 0]", "World to that map, a row each" )
+		SHADER_PARAM( CONESHADOW2, SHADER_PARAM_TYPE_VEC4, "[0 0 0 0]", "" )
+		SHADER_PARAM( CONESHADOW3, SHADER_PARAM_TYPE_VEC4, "[0 0 0 0]", "" )
+		SHADER_PARAM( CONESHADOW4, SHADER_PARAM_TYPE_VEC4, "[0 0 0 1]", "" )
 	END_SHADER_PARAMS
 
 	SHADER_INIT_PARAMS()
@@ -61,10 +66,16 @@ BEGIN_VS_SHADER( OF2_LightCone, "Light in the air from a flashlight" )
 			pShaderShadow->EnableSRGBWrite( true );
 			FogToBlack();
 
+			// The lamp's shadow depth map, when it has one
+			int nShadowFilterMode = g_pHardwareConfig->GetShadowFilterMode();
+			pShaderShadow->EnableTexture( SHADER_SAMPLER0, true );
+			pShaderShadow->SetShadowDepthFiltering( SHADER_SAMPLER0 );
+
 			DECLARE_STATIC_VERTEX_SHADER( of2_lightcone_vs20 );
 			SET_STATIC_VERTEX_SHADER( of2_lightcone_vs20 );
 
 			DECLARE_STATIC_PIXEL_SHADER( of2_lightcone_ps20b );
+			SET_STATIC_PIXEL_SHADER_COMBO( FLASHLIGHTDEPTHFILTERMODE, nShadowFilterMode );
 			SET_STATIC_PIXEL_SHADER( of2_lightcone_ps20b );
 		}
 
@@ -73,11 +84,23 @@ BEGIN_VS_SHADER( OF2_LightCone, "Light in the air from a flashlight" )
 			DECLARE_DYNAMIC_VERTEX_SHADER( of2_lightcone_vs20 );
 			SET_DYNAMIC_VERTEX_SHADER( of2_lightcone_vs20 );
 
+			bool bShadowMap = params[CONEDEPTH]->IsTexture();
+			if ( bShadowMap )
+			{
+				BindTexture( SHADER_SAMPLER0, CONEDEPTH, -1 );
+			}
+			else
+			{
+				pShaderAPI->BindStandardTexture( SHADER_SAMPLER0, TEXTURE_WHITE );
+			}
+
 			DECLARE_DYNAMIC_PIXEL_SHADER( of2_lightcone_ps20b );
+			SET_DYNAMIC_PIXEL_SHADER_COMBO( SHADOWMAP, bShadowMap );
 			SET_DYNAMIC_PIXEL_SHADER( of2_lightcone_ps20b );
 
 			static const int s_nParams[8] = { CONEAPEX, CONEAXIS, CONESHAPE, CONECOLOR, CONEPLANE1, CONEPLANE2, CONEPLANE3, CONEPLANE4 };
-			float flConst[9][4];
+			static const int s_nShadow[4] = { CONESHADOW1, CONESHADOW2, CONESHADOW3, CONESHADOW4 };
+			float flConst[13][4];
 			for ( int i = 0; i < 8; i++ )
 			{
 				params[s_nParams[i]]->GetVecValue( flConst[i], 4 );
@@ -86,7 +109,12 @@ BEGIN_VS_SHADER( OF2_LightCone, "Light in the air from a flashlight" )
 			pShaderAPI->GetWorldSpaceCameraPosition( flConst[8] );
 			flConst[8][3] = 0.0f;
 
-			pShaderAPI->SetPixelShaderConstant( 0, flConst[0], 9 );
+			for ( int i = 0; i < 4; i++ )
+			{
+				params[s_nShadow[i]]->GetVecValue( flConst[9 + i], 4 );
+			}
+
+			pShaderAPI->SetPixelShaderConstant( 0, flConst[0], 13 );
 		}
 
 		Draw();

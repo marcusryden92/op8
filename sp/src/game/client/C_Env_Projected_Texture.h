@@ -48,6 +48,9 @@ public:
 	static float GetVisibleBBoxMinHeight( void ) { return m_flVisibleBBoxMinHeight; }
 	static C_EnvProjectedTexture *Create( );
 
+	// OF2: for reading its shadow depth map (IClientShadowMgr::OF2_GetFlashlightDepth)
+	ClientShadowHandle_t OF2_GetLightHandle( void ) const { return m_LightHandle; }
+
 private:
 
 	inline bool IsBBoxVisible( void );

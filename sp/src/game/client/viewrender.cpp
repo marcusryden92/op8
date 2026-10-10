@@ -1163,6 +1163,27 @@ void CViewRender::DrawViewModels( const CViewSetup &view, bool drawViewmodel )
 		DrawRenderablesInList( translucentViewModelList, STUDIO_TRANSPARENCY );
 	}
 
+#ifdef HL2_EPISODIC
+	// OF2: the Barnacle in the hand and the start of its tongue: in front of the
+	// world as the viewmodels are, but seen as the world is (hl2\c_of2_tongue.cpp)
+	if ( bShouldDrawPlayerViewModel )
+	{
+		CViewSetup worldSetup( view );
+		worldSetup.zNear = view.zNearViewmodel;
+		worldSetup.zFar = view.zFarViewmodel;
+		worldSetup.m_flAspectRatio = engine->GetScreenAspectRatio();
+
+		render->Push3DView( worldSetup, 0, pRTColor, GetFrustum(), pRTDepth );
+		if ( bUseDepthHack )
+			pRenderContext->DepthRange( 0.0f, 0.1f );
+
+		extern void OF2_DrawBarnacleOverlay( void );
+		OF2_DrawBarnacleOverlay();
+
+		render->PopView( GetFrustum() );
+	}
+#endif
+
 	// Reset the depth range to the original values
 	if( bUseDepthHack )
 		pRenderContext->DepthRange( depthmin, depthmax );

@@ -21,4 +21,10 @@
 // OF2_TETHER_MAX_PIVOTS)
 #define OF2_TONGUE_MAX_BENDS	16
 
+// The barnacle in the hand whips before it snaps a neck: the server starts it
+// ("OF2BarnacleFlick", with how long all of it takes) and snaps the neck when
+// this share of that time has gone by, which is when the client has the mouth
+// at the top.
+#define OF2_BARNACLE_FLICK_SNAP	0.431f
+
 #endif // OF2_TONGUE_SHARED_H
