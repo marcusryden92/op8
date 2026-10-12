@@ -32,6 +32,12 @@
 ConVar	sk_ichthyosaur_health( "sk_ichthyosaur_health", "0" );
 ConVar	sk_ichthyosaur_melee_dmg( "sk_ichthyosaur_melee_dmg", "0" );
 
+// OF2: the grab Valve wrote and never switched on (EnsnareVictim was commented out of Bite)
+ConVar	of2_ichthyosaur_grab( "of2_ichthyosaur_grab", "1", FCVAR_NONE, "1: an ichthyosaur's bite can catch the player and drag them under. 0: it only bites, as in stock HL2." );
+ConVar	of2_ichthyosaur_grab_health( "of2_ichthyosaur_grab_health", "0.5", FCVAR_NONE, "An ichthyosaur's bite catches a player below this share of full health (1: any bite, 0: never by health). One out of the water is always caught." );
+ConVar	of2_ichthyosaur_hold_max( "of2_ichthyosaur_hold_max", "8", FCVAR_NONE, "Longest an ichthyosaur holds the player, in seconds. It otherwise lets go 2 seconds before their air runs out." );
+ConVar	of2_ichthyosaur_hold_dist( "of2_ichthyosaur_hold_dist", "45", FCVAR_NONE, "How far in front of an ichthyosaur's origin the middle of the player it holds is kept, in units." );
+
 #define	ICHTHYOSAUR_MODEL	"models/ichthyosaur.mdl"
 
 #define	ICH_HEIGHT_PREFERENCE	16.0f
@@ -47,6 +53,11 @@ ConVar	sk_ichthyosaur_melee_dmg( "sk_ichthyosaur_melee_dmg", "0" );
 
 #define	ICH_MIN_TURN_SPEED		4.0f
 #define	ICH_MAX_TURN_SPEED		30.0f
+
+// OF2: a victim this far from the mouth has got away (blocked by the world, teleported)
+#define	ICH_HOLD_LOST_DIST		200.0f
+// OF2: how fast a caught victim is drawn in to the mouth, units a second
+#define	ICH_HOLD_PULL_SPEED		400.0f
 
 #define	ENVELOPE_CONTROLLER		(CSoundEnvelopeController::GetController())
 
@@ -89,7 +100,12 @@ public:
 
 	float	MaxYawSpeed( void );
 
-	Class_T Classify( void )	{	return CLASS_ANTLION;	}	//FIXME: No classification for various wildlife?
+	Class_T Classify( void )	{	return CLASS_ICHTHYOSAUR;	}	// OF2: it was CLASS_ANTLION, for want of a class for wildlife
+
+	// OF2
+	void	Event_Killed( const CTakeDamageInfo &info );
+	void	UpdateOnRemove( void );
+	void	StopLoopingSounds( void );
 
 	bool	FVisible( CBaseEntity *pEntity, int traceMask = MASK_BLOCKLOS, CBaseEntity **ppBlocker = NULL );
 
@@ -107,7 +123,7 @@ private:
 	void	Bite( void );
 	void	EnsnareVictim( CBaseEntity *pVictim );
 	void	ReleaseVictim( void );
-	void	DragVictim( float moveDist );
+	void	DragVictim( float flInterval );
 
 	void	SetPoses( Vector moveRel, float speed );
 
@@ -141,7 +157,9 @@ private:
 
 	//CSoundPatch	*m_pSwimSound;
 	//CSoundPatch	*m_pVoiceSound;
-	
+	CSoundPatch	*m_pBreathSound;	// OF2
+	Vector		m_vecVictimFree;	// OF2: the last place the victim fitted
+
 	DEFINE_CUSTOM_AI;
 };
 
@@ -166,6 +184,8 @@ BEGIN_DATADESC( CNPC_Ichthyosaur )
 	DEFINE_FIELD( m_flNextGrowlTime,		FIELD_FLOAT ),
 	DEFINE_FIELD( m_bHasMoveTarget,		FIELD_BOOLEAN ),
 	DEFINE_FIELD( m_bIgnoreSurface,		FIELD_BOOLEAN ),
+	DEFINE_SOUNDPATCH( m_pBreathSound ),
+	DEFINE_FIELD( m_vecVictimFree,		FIELD_POSITION_VECTOR ),
 
 	//DEFINE_FUNCTION( IchTouch ),
 
@@ -246,6 +266,10 @@ void CNPC_Ichthyosaur::Precache( void )
 	PrecacheScriptSound( "NPC_Ichthyosaur.BiteMiss" );
 	PrecacheScriptSound( "NPC_Ichthyosaur.AttackGrowl" );
 
+	// OF2: in the mod's game_sounds_of2.txt
+	PrecacheScriptSound( "NPC_Ichthyosaur.OF2Breath" );
+	PrecacheScriptSound( "NPC_Ichthyosaur.OF2Growl" );
+
 	BaseClass::Precache();
 }
 
@@ -287,6 +311,9 @@ void CNPC_Ichthyosaur::Spawn( void )
 	m_flHoldTime			= gpGlobals->curtime;
 	m_flNextPingTime		= gpGlobals->curtime;
 	m_flNextGrowlTime		= gpGlobals->curtime;
+
+	m_pVictim				= NULL;
+	m_pBreathSound			= NULL;
 
 #if FEELER_COLLISION
 
@@ -441,33 +468,50 @@ Vector CNPC_Ichthyosaur::DoProbe( const Vector &probe )
 // Input  : moveDist - our amount of travel
 //-----------------------------------------------------------------------------
 
-#define	DRAG_OFFSET	50.0f
-
-void CNPC_Ichthyosaur::DragVictim( float moveDist )
+void CNPC_Ichthyosaur::DragVictim( float flInterval )
 {
-	Vector	mins, maxs;
-	float	width;
-	
-	mins	= WorldAlignMins();
-	maxs	= WorldAlignMaxs();
-	width	= ( maxs.y - mins.y ) * 0.5f;
+	// OF2: Valve's version put the victim at a new place every think (ten jumps a second on screen), swept the
+	// ichthyosaur's own box to get there and let go if that touched anything, which next to any wall or floor is
+	// at once. The victim is parented to us instead (EnsnareVictim), so the client moves it with us every frame,
+	// and this only sees to where in front of us it sits: drawn in to the mouth, and kept out of the world.
+	Vector	forward;
+	GetVectors( &forward, NULL, NULL );
 
-	Vector	forward, up;
-	GetVectors( &forward, NULL, &up );
-
-	Vector	newPos = GetAbsOrigin() + ( (forward+(up*0.25f)) * ( moveDist + width + DRAG_OFFSET ) );
+	Vector	vecMiddle = m_pVictim->WorldSpaceCenter() - m_pVictim->GetAbsOrigin();
+	Vector	vecHold = GetAbsOrigin() + ( forward * of2_ichthyosaur_hold_dist.GetFloat() ) - vecMiddle;
 
 	trace_t	tr;
-	AI_TraceEntity( this, m_pVictim->GetAbsOrigin(), newPos, MASK_NPCSOLID, &tr );
+	CTraceFilterSkipTwoEntities filter( m_pVictim, this, COLLISION_GROUP_NONE );
 
-	if ( ( tr.fraction == 1.0f ) && ( tr.m_pEnt != this ) )
+	// We may have carried it into something since the last think: go on from the last place it fitted
+	Vector	vecFrom = m_pVictim->GetAbsOrigin();
+	UTIL_TraceHull( vecFrom, vecFrom, m_pVictim->WorldAlignMins(), m_pVictim->WorldAlignMaxs(), MASK_PLAYERSOLID, &filter, &tr );
+
+	if ( tr.startsolid )
 	{
-		UTIL_SetOrigin( m_pVictim, tr.endpos );
+		vecFrom = m_vecVictimFree;
 	}
-	else
+
+	Vector	vecTo = vecHold;
+	Vector	vecStep = vecTo - vecFrom;
+	float	flStep = vecStep.Length();
+	float	flMaxStep = ICH_HOLD_PULL_SPEED * flInterval;
+
+	if ( flStep > flMaxStep )
+	{
+		vecTo = vecFrom + ( vecStep * ( flMaxStep / flStep ) );
+	}
+
+	UTIL_TraceHull( vecFrom, vecTo, m_pVictim->WorldAlignMins(), m_pVictim->WorldAlignMaxs(), MASK_PLAYERSOLID, &filter, &tr );
+
+	if ( tr.startsolid || ( ( vecHold - tr.endpos ).LengthSqr() > Square( ICH_HOLD_LOST_DIST ) ) )
 	{
 		ReleaseVictim();
+		return;
 	}
+
+	m_pVictim->SetAbsOrigin( tr.endpos );
+	m_vecVictimFree = tr.endpos;
 }
 
 //-----------------------------------------------------------------------------
@@ -707,7 +751,7 @@ void CNPC_Ichthyosaur::DoMovement( float flInterval, const Vector &MoveTarget, i
 	//Drag our victim before moving
 	if ( m_pVictim != NULL )
 	{
-		DragVictim( (workVelocity*flInterval).Length() );
+		DragVictim( flInterval );
 	}
 
 	//Move along the current velocity vector
@@ -973,7 +1017,9 @@ void CNPC_Ichthyosaur::MoveFlyExecute( CBaseEntity *pTargetEnt, const Vector &ve
 bool CNPC_Ichthyosaur::FVisible( CBaseEntity *pEntity, int traceMask, CBaseEntity **ppBlocker )
 {
 	// don't look through water
-	if ( GetWaterLevel() != pEntity->GetWaterLevel() )
+	// OF2: this asked for the same water level as ours, so a player swimming at the surface or wading (level 1
+	// or 2) could not be seen from below (3). In the water at all is enough.
+	if ( ( GetWaterLevel() > 0 ) != ( pEntity->GetWaterLevel() > 0 ) )
 		return false;
 
 	return BaseClass::FVisible( pEntity, traceMask, ppBlocker );
@@ -1040,6 +1086,11 @@ void CNPC_Ichthyosaur::Bite( void )
 	{
 		pHurt = GetEnemy();
 	}
+	else if ( m_pVictim != NULL )
+	{
+		// OF2: what we hold is not solid, the trace would miss it
+		pHurt = m_pVictim;
+	}
 	else
 	{
 		pHurt = CheckTraceHullAttack( 108, Vector(-32,-32,-32), Vector(32,32,32), 0, DMG_CLUB );
@@ -1056,9 +1107,17 @@ void CNPC_Ichthyosaur::Bite( void )
 
 			if ( pPlayer )
 			{
-				if ( ( ( m_flHoldTime < gpGlobals->curtime ) && ( pPlayer->m_iHealth < (pPlayer->m_iMaxHealth*0.5f)) ) || ( pPlayer->GetWaterLevel() < 1 ) )
+				// OF2: the grab is on again (it was commented out); the share of health was a fixed half
+				if ( pHurt == m_pVictim )
 				{
-					//EnsnareVictim( pHurt );
+					// Held: plain bites
+				}
+				else if ( ( ( m_flHoldTime < gpGlobals->curtime ) && ( pPlayer->m_iHealth < (pPlayer->m_iMaxHealth*of2_ichthyosaur_grab_health.GetFloat())) ) || ( pPlayer->GetWaterLevel() < 1 ) )
+				{
+					if ( of2_ichthyosaur_grab.GetBool() )
+					{
+						EnsnareVictim( pHurt );
+					}
 				}
 				else
 				{
@@ -1152,6 +1211,18 @@ void CNPC_Ichthyosaur::PrescheduleThink( void )
 	}
 	*/
 
+	// OF2: the breathing loop, louder and higher the faster it swims
+	if ( m_pBreathSound == NULL )
+	{
+		CPASAttenuationFilter filter( this );
+		m_pBreathSound = ENVELOPE_CONTROLLER.SoundCreate( filter, entindex(), "NPC_Ichthyosaur.OF2Breath" );
+		ENVELOPE_CONTROLLER.Play( m_pBreathSound, 0.0f, 100 );
+	}
+
+	float flEffort = clamp( GetAbsVelocity().Length() / ICH_SWIM_SPEED_RUN, 0.0f, 1.0f );
+	ENVELOPE_CONTROLLER.SoundChangeVolume( m_pBreathSound, 0.3f + ( 0.7f * flEffort ), 0.5f );
+	ENVELOPE_CONTROLLER.SoundChangePitch( m_pBreathSound, 90.0f + ( 20.0f * flEffort ), 0.5f );
+
 	//Pings
 	if ( m_flNextPingTime < gpGlobals->curtime )
 	{
@@ -1162,6 +1233,9 @@ void CNPC_Ichthyosaur::PrescheduleThink( void )
 	if ( ( m_NPCState == NPC_STATE_COMBAT || m_NPCState == NPC_STATE_ALERT ) && ( m_flNextGrowlTime < gpGlobals->curtime ) )
 	{
 		m_flNextGrowlTime = gpGlobals->curtime + random->RandomFloat( 2.0f, 6.0f );
+
+		// OF2: the timer played nothing. Not Valve's NPC_Ichthyosaur.Growl: four of its five wavs were never shipped.
+		EmitSound( "NPC_Ichthyosaur.OF2Growl" );
 	}
 
 	//Randomly emit bubbles
@@ -1195,8 +1269,8 @@ void CNPC_Ichthyosaur::PrescheduleThink( void )
 	//If we have a victim, update them
 	if ( m_pVictim != NULL )
 	{
-		//See if it's time to release the victim
-		if ( m_flHoldTime < gpGlobals->curtime )
+		//See if it's time to release the victim (OF2: or it has died)
+		if ( ( m_flHoldTime < gpGlobals->curtime ) || ( m_pVictim->IsAlive() == false ) )
 		{
 			ReleaseVictim();
 			return;
@@ -1216,7 +1290,7 @@ void CNPC_Ichthyosaur::PrescheduleThink( void )
 int	CNPC_Ichthyosaur::OnTakeDamage_Alive( const CTakeDamageInfo &info )
 {
 	//Release the player if he's struck us while being held
-	if ( m_flHoldTime > gpGlobals->curtime )
+	if ( ( m_flHoldTime > gpGlobals->curtime ) && ( m_pVictim != NULL ) )
 	{
 		ReleaseVictim();
 		
@@ -1234,6 +1308,10 @@ int	CNPC_Ichthyosaur::OnTakeDamage_Alive( const CTakeDamageInfo &info )
 //-----------------------------------------------------------------------------
 void CNPC_Ichthyosaur::EnsnareVictim( CBaseEntity *pVictim )
 {
+	// OF2: the player only. An NPC stops thinking when grabbed and is removed outright when let go.
+	if ( ( m_pVictim != NULL ) || ( pVictim == NULL ) || ( pVictim->IsPlayer() == false ) || ( pVictim->IsAlive() == false ) )
+		return;
+
 	CBaseCombatCharacter* pBCC = (CBaseCombatCharacter *) pVictim;
 
 	if ( pBCC && pBCC->DispatchInteraction( g_interactionBarnacleVictimGrab, NULL, this ) )
@@ -1245,6 +1323,7 @@ void CNPC_Ichthyosaur::EnsnareVictim( CBaseEntity *pVictim )
 			if ( pPlayer )
 			{
 				m_flHoldTime = MAX( gpGlobals->curtime+3.0f, pPlayer->PlayerDrownTime() - 2.0f );
+				m_flHoldTime = MIN( m_flHoldTime, gpGlobals->curtime + of2_ichthyosaur_hold_max.GetFloat() );	// OF2
 			}
 		}
 		else
@@ -1255,6 +1334,16 @@ void CNPC_Ichthyosaur::EnsnareVictim( CBaseEntity *pVictim )
 		m_pVictim = pVictim;
 		m_pVictim->AddSolidFlags( FSOLID_NOT_SOLID );
 
+		// OF2: carried as our child, which the client moves with us every frame; put somewhere new each think
+		// it jumped ten times a second. The player's Released interaction sets the move type back.
+		m_vecVictimFree = m_pVictim->GetAbsOrigin();
+		m_pVictim->SetGroundEntity( NULL );
+		m_pVictim->SetAbsVelocity( vec3_origin );
+		m_pVictim->SetMoveType( MOVETYPE_NONE );
+		m_pVictim->SetParent( this );
+
+		EmitSound( "NPC_Ichthyosaur.AttackGrowl" );	// OF2
+
 		SetSchedule( SCHED_ICH_DROWN_VICTIM );
 	}
 }
@@ -1264,7 +1353,24 @@ void CNPC_Ichthyosaur::EnsnareVictim( CBaseEntity *pVictim )
 //-----------------------------------------------------------------------------
 void CNPC_Ichthyosaur::ReleaseVictim( void )
 {
+	if ( m_pVictim == NULL )
+		return;
+
 	CBaseCombatCharacter *pBCC = (CBaseCombatCharacter *) m_pVictim;
+
+	// OF2: off us again, at the last place it fitted if we carried it into something, and with our speed
+	m_pVictim->SetParent( NULL );
+
+	trace_t	tr;
+	CTraceFilterSkipTwoEntities filter( m_pVictim, this, COLLISION_GROUP_NONE );
+	UTIL_TraceHull( m_pVictim->GetAbsOrigin(), m_pVictim->GetAbsOrigin(), m_pVictim->WorldAlignMins(), m_pVictim->WorldAlignMaxs(), MASK_PLAYERSOLID, &filter, &tr );
+
+	if ( tr.startsolid )
+	{
+		m_pVictim->SetAbsOrigin( m_vecVictimFree );
+	}
+
+	m_pVictim->SetAbsVelocity( GetAbsVelocity() );
 
 	pBCC->DispatchInteraction( g_interactionBarnacleVictimReleased, NULL, this );
 
@@ -1276,7 +1382,32 @@ void CNPC_Ichthyosaur::ReleaseVictim( void )
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: 
+// Purpose: OF2: a held player cannot move and is not solid, so nothing may end us without letting go
+//-----------------------------------------------------------------------------
+void CNPC_Ichthyosaur::Event_Killed( const CTakeDamageInfo &info )
+{
+	ReleaseVictim();
+
+	BaseClass::Event_Killed( info );
+}
+
+void CNPC_Ichthyosaur::UpdateOnRemove( void )
+{
+	ReleaseVictim();
+
+	BaseClass::UpdateOnRemove();
+}
+
+void CNPC_Ichthyosaur::StopLoopingSounds( void )
+{
+	ENVELOPE_CONTROLLER.SoundDestroy( m_pBreathSound );
+	m_pBreathSound = NULL;
+
+	BaseClass::StopLoopingSounds();
+}
+
+//-----------------------------------------------------------------------------
+// Purpose:
 // Output : speed to move at
 //-----------------------------------------------------------------------------
 float CNPC_Ichthyosaur::GetGroundSpeed( void )
@@ -1339,7 +1470,19 @@ void CNPC_Ichthyosaur::StartTask( const Task_t *pTask )
 
 	case TASK_ICH_GET_PATH_TO_DROWN_NODE:
 		{
-			Vector	drownPos = GetLocalOrigin() - Vector( 0, 0, pTask->flTaskData );
+			// OF2: as deep as there is room for. A place inside the bottom has no route, and it then never dived.
+			trace_t	tr;
+			AI_TraceHull( GetAbsOrigin(), GetAbsOrigin() - Vector( 0, 0, pTask->flTaskData ), GetHullMins(), GetHullMaxs(), MASK_NPCSOLID, this, COLLISION_GROUP_NONE, &tr );
+
+			float	flDepth = ( pTask->flTaskData * tr.fraction ) - ICH_HEIGHT_PREFERENCE;
+
+			if ( flDepth < 32.0f )
+			{
+				TaskFail( FAIL_NO_ROUTE );
+				return;
+			}
+
+			Vector	drownPos = GetLocalOrigin() - Vector( 0, 0, flDepth );
 
 			if ( GetNavigator()->SetGoal( drownPos, AIN_CLEAR_TARGET ) == false )
 			{
@@ -1410,6 +1553,17 @@ void CNPC_Ichthyosaur::TranslateNavGoal( CBaseEntity *pEnemy, Vector &chasePosit
 {
 	Vector offset = pEnemy->EyePosition() - pEnemy->GetAbsOrigin();
 	chasePosition += offset;
+
+	// OF2: now that it sees someone with their head out of the water: go for the part of them that is in it
+	if ( ( UTIL_PointContents( chasePosition ) & MASK_WATER ) == 0 )
+	{
+		chasePosition = pEnemy->WorldSpaceCenter();
+
+		if ( ( UTIL_PointContents( chasePosition ) & MASK_WATER ) == 0 )
+		{
+			chasePosition = pEnemy->GetAbsOrigin() + Vector( 0, 0, 8 );
+		}
+	}
 }
 
 float CNPC_Ichthyosaur::GetDefaultNavGoalTolerance()

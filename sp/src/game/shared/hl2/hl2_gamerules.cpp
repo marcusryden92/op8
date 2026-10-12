@@ -1498,6 +1498,24 @@ ConVar  alyx_darkness_force( "alyx_darkness_force", "0", FCVAR_CHEAT | FCVAR_REP
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_HACKED_ROLLERMINE,			CLASS_PLAYER_ALLY,		D_LI, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_HACKED_ROLLERMINE,			CLASS_PLAYER_ALLY_VITAL,D_LI, 0);
 		CBaseCombatCharacter::SetDefaultRelationship(CLASS_HACKED_ROLLERMINE,			CLASS_HACKED_ROLLERMINE,D_LI, 0);
+
+		// ------------------------------------------------------------
+		//	> CLASS_ICHTHYOSAUR
+		// OF2: it used to pass for an antlion, so it starts as one: everyone thinks of it what they think of
+		// antlions and it hates what they hate. Then the two are set against each other.
+		// ------------------------------------------------------------
+		for (i=0;i<NUM_AI_CLASSES;i++)
+		{
+			CBaseCombatCharacter::SetDefaultRelationship( (Class_T)i, CLASS_ICHTHYOSAUR,
+				CBaseCombatCharacter::GetDefaultRelationshipDisposition( (Class_T)i, CLASS_ANTLION ),
+				CBaseCombatCharacter::GetDefaultRelationshipPriority( (Class_T)i, CLASS_ANTLION ) );
+			CBaseCombatCharacter::SetDefaultRelationship( CLASS_ICHTHYOSAUR, (Class_T)i,
+				CBaseCombatCharacter::GetDefaultRelationshipDisposition( CLASS_ANTLION, (Class_T)i ),
+				CBaseCombatCharacter::GetDefaultRelationshipPriority( CLASS_ANTLION, (Class_T)i ) );
+		}
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_ICHTHYOSAUR,			CLASS_ICHTHYOSAUR,		D_LI, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_ICHTHYOSAUR,			CLASS_ANTLION,			D_HT, 0);
+		CBaseCombatCharacter::SetDefaultRelationship(CLASS_ANTLION,				CLASS_ICHTHYOSAUR,		D_HT, 0);
 	}
 
 
@@ -1542,6 +1560,7 @@ ConVar  alyx_darkness_force( "alyx_darkness_force", "0", FCVAR_CHEAT | FCVAR_REP
 #ifdef MAPBASE
 			case CLASS_HACKED_ROLLERMINE:	return "CLASS_HACKED_ROLLERMINE";
 #endif
+			case CLASS_ICHTHYOSAUR:		return "CLASS_ICHTHYOSAUR";	// OF2
 
 			default:					return "MISSING CLASS in ClassifyText()";
 		}

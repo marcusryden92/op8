@@ -1,3 +1,22 @@
+	return InBeam( vecPos );
+}
+
+bool COF2Flashlight::InBeam( const Vector &vecPos )
+{
+	if ( !m_bOn || !m_pOuter )
+		return false;
+			bool bSeesSpot = !m_pOuter->HasCondition( COND_SEE_ENEMY ) && ( m_flDarkRate > 0.0f || m_bSpotLit ) &&
+				vecSpot.DistTo( m_pOuter->EyePosition() ) <= of2_stealth_lkp_see_dist.GetFloat() &&
+				m_pOuter->FInViewCone( vecSpot ) && m_pOuter->FVisible( vecSpot );
+
+			// Standing on it is as good as seeing it, light or none. (Without this, those
+			// who ran to a shot they heard in the dark went on fighting nobody there for
+			// of2_stealth_lose_time, dashing about as the combat AI does, before they searched.)
+			if ( !m_pOuter->HasCondition( COND_SEE_ENEMY ) && ( m_pOuter->GetAbsOrigin() - m_vecStimulus ).Length2D() < STEALTH_LKP_REACHED &&
+				fabs( m_pOuter->GetAbsOrigin().z - m_vecStimulus.z ) < 72.0f )
+			{
+				bSeesSpot = true;
+			}
 
 	// Picked to go along: nobody looks into things alone
 	if ( s_bAlertRecruits )
@@ -26,6 +45,7 @@
 #include "ai_squad.h"
 #include "ai_network.h"
 #include "ai_node.h"
+#include "ai_link.h"
 #include "ai_navigator.h"
 #include "ai_motor.h"
 #include "ai_behavior_follow.h"
@@ -50,12 +70,12 @@ static ConVar of2_stealth_decay( "of2_stealth_decay", "0.05", FCVAR_NONE, "Steal
 static ConVar of2_stealth_decay_delay( "of2_stealth_decay_delay", "4", FCVAR_NONE, "Stealth: seconds after the last evidence before suspicion starts to fade." );
 static ConVar of2_stealth_search_time( "of2_stealth_search_time", "30", FCVAR_NONE, "Stealth: seconds an NPC keeps searching after a noise or a glimpse. New evidence extends it." );
 static ConVar of2_stealth_search_time_lost( "of2_stealth_search_time_lost", "45", FCVAR_NONE, "Stealth: seconds an NPC keeps searching after losing an enemy it was fighting." );
-static ConVar of2_stealth_search_radius( "of2_stealth_search_radius", "400", FCVAR_NONE, "Stealth: how far from the place it was drawn to an NPC searches." );
+static ConVar of2_stealth_search_radius( "of2_stealth_search_radius", "600", FCVAR_NONE, "Stealth: how far from the place it was drawn to an NPC searches." );
 static ConVar of2_stealth_lose_time( "of2_stealth_lose_time", "20", FCVAR_NONE, "Stealth: seconds without anyone in the squad seeing the player before an NPC stops knowing where they are and searches instead (0 = stock, about a minute)." );
 
 // Once it knows there is an armed enemy
 static ConVar of2_stealth_search_forever( "of2_stealth_search_forever", "1", FCVAR_NONE, "Stealth: an NPC that has fought the player, been shot at or heard gunfire never stands down: it goes on searching, further and further out (0 = it gives up after of2_stealth_search_time_lost)." );
-static ConVar of2_stealth_search_spread( "of2_stealth_search_spread", "15", FCVAR_NONE, "Stealth: units per second the search of such an NPC widens from the last place it had word of the player." );
+static ConVar of2_stealth_search_spread( "of2_stealth_search_spread", "30", FCVAR_NONE, "Stealth: units per second the search of such an NPC widens from the last place it had word of the player." );
 static ConVar of2_stealth_search_radius_max( "of2_stealth_search_radius_max", "1500", FCVAR_NONE, "Stealth: the widest that search gets." );
 static ConVar of2_stealth_lkp_see_dist( "of2_stealth_lkp_see_dist", "800", FCVAR_NONE, "Stealth: from this close, an NPC looking at the place it last knew the player to be can tell they are not there." );
 static ConVar of2_stealth_lkp_empty_time( "of2_stealth_lkp_empty_time", "1.5", FCVAR_NONE, "Stealth: seconds of looking at that place before it concludes the player has gone, stops firing at it and searches." );
@@ -98,6 +118,11 @@ static ConVar of2_stealth_squad_radius( "of2_stealth_squad_radius", "1500", FCVA
 static ConVar of2_stealth_report_interval( "of2_stealth_report_interval", "3", FCVAR_NONE, "Stealth: seconds between the positions a squadmate who sees the player passes on." );
 
 static ConVar of2_stealth_search_partners( "of2_stealth_search_partners", "1", FCVAR_NONE, "Stealth: an NPC that goes to look into something by itself takes this many of the nearest squadmates along." );
+// The Barnacle's tongue
+static ConVar of2_stealth_tongue( "of2_stealth_tongue", "1", FCVAR_NONE, "Stealth: NPCs see the Barnacle's tongue while it is out (in their view, a clear line, and lit for those without night vision) and follow it back to the player." );
+static ConVar of2_stealth_tongue_dist( "of2_stealth_tongue_dist", "900", FCVAR_NONE, "Stealth: how far off an NPC makes out the Barnacle's tongue." );
+static ConVar of2_stealth_tongue_time( "of2_stealth_tongue_time", "0.6", FCVAR_NONE, "Stealth: seconds an NPC with nothing on its mind looks at the tongue before it has followed it back to the player. One that is already suspicious, searching or fighting, or has the tongue in its flashlight's beam, does so at once." );
+
 // Bodies
 static ConVar of2_stealth_bodies( "of2_stealth_bodies", "1", FCVAR_NONE, "Stealth: Combine who come across one of their own dead know an enemy is about and search, and a squad only hears of a death one of them saw or that happens while they are alerted (0 = stock: bodies are ignored, every death is called out)." );
 static ConVar of2_stealth_body_dist( "of2_stealth_body_dist", "800", FCVAR_NONE, "Stealth: how far off an NPC notices a body in its view. Without night vision it also has to be lit: by the room or by its flashlight." );
@@ -109,6 +134,7 @@ static ConVar of2_stealth_body_dist( "of2_stealth_body_dist", "800", FCVAR_NONE,
 #define STEALTH_REACT_INTERVAL		1.5f	// and it does that no more often than this
 #define STEALTH_MAP_SETTLE_TIME		3.0f	// props dropping into place at map start are not noise
 #define STEALTH_LKP_HEIGHT			40.0f	// chest height over a last known position
+#define STEALTH_LKP_REACHED			180.0f	// this near a last known position, an NPC is at it
 #define STEALTH_GUNFIRE_VOLUME		500		// SOUNDENT_VOLUME_EMPTY: the player's combat sounds louder than a dry click are shots
 #define STEALTH_GOAL_TOLERANCE		48.0f	// near enough to a place it was drawn to
 #define STEALTH_BODY_LOOK_INTERVAL	0.5f	// how often an NPC looks about for bodies
@@ -183,6 +209,10 @@ COF2Awareness::COF2Awareness()
 	m_bFollowing = false;
 	m_bSearchCrouch = false;
 	m_flStandTime = 0.0f;
+	m_nSearchSerial = 0;
+	m_flNextTongueLook = 0.0f;
+	m_flTongueSeen = 0.0f;
+	m_iInvestigateSlot = 0;
 	m_iCrouchWant = 0;
 	m_vecStimulus.Init();
 	m_iStimulus = STIM_NONE;
@@ -310,6 +340,8 @@ void COF2Awareness::Update( void )
 		}
 		return;
 	}
+
+	LookForTongue();
 
 	CBaseEntity *pEnemy = m_pOuter->GetEnemy();
 	if ( pEnemy && pEnemy->IsPlayer() )
@@ -1075,6 +1107,90 @@ void COF2Awareness::LookForBodies( void )
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: The Barnacle's tongue is a line from wherever it has hold to the
+//			player (the user: they have to be able to see it and work out where
+//			the player is from it). A moment of having any of it in view and the
+//			NPC has followed it back: it knows where the player is, as with a
+//			shot it heard, and for as long as it goes on seeing it. Before that
+//			it is something odd to look into.
+//-----------------------------------------------------------------------------
+extern int OF2_BarnacleTonguePoints( Vector *pPoints, int nMax, CBasePlayer **ppOwner );
+
+#define STEALTH_TONGUE_INTERVAL	0.2f
+#define STEALTH_TONGUE_POINTS	16
+
+void COF2Awareness::LookForTongue( void )
+{
+	float flNow = gpGlobals->curtime;
+	if ( flNow < m_flNextTongueLook && flNow > m_flNextTongueLook - 5.0f )
+		return;
+
+	m_flNextTongueLook = flNow + STEALTH_TONGUE_INTERVAL;
+
+	bool bSeen = false;
+	bool bInBeam = false;
+	Vector vecSeen = vec3_origin;
+	CBasePlayer *pPlayer = NULL;
+
+	if ( of2_stealth_tongue.GetBool() && !m_pOuter->IsInAScript() && m_pOuter->GetState() != NPC_STATE_SCRIPT )
+	{
+		Vector vecPoints[STEALTH_TONGUE_POINTS];
+		int nPoints = OF2_BarnacleTonguePoints( vecPoints, STEALTH_TONGUE_POINTS, &pPlayer );
+
+		// (One that sees the player has no need of it; one that is no enemy of theirs no interest)
+		bool bSeesPlayer = pPlayer && m_pOuter->GetEnemy() == pPlayer && m_pOuter->HasCondition( COND_SEE_ENEMY );
+		Disposition_t disposition = pPlayer ? m_pOuter->IRelationType( pPlayer ) : D_NU;
+
+		if ( nPoints > 0 && !bSeesPlayer && ( disposition == D_HT || disposition == D_FR ) )
+		{
+			float flDist = of2_stealth_tongue_dist.GetFloat();
+			for ( int i = 0; i < nPoints && !bSeen; i++ )
+			{
+				// In its own beam it cannot be missed, whatever the room is like (the user:
+				// the cone crossing the tongue ought to give it away, and did not)
+				bool bBeam = m_pLight && m_pLight->InBeam( vecPoints[i] );
+				if ( SeesPlace( vecPoints[i], flDist, !bBeam ) )
+				{
+					bSeen = true;
+					bInBeam = bBeam;
+					vecSeen = vecPoints[i];
+				}
+			}
+		}
+	}
+
+	if ( !bSeen )
+	{
+		m_flTongueSeen = MAX( 0.0f, m_flTongueSeen - STEALTH_TONGUE_INTERVAL * 0.5f );
+		return;
+	}
+
+	m_flTongueSeen = MIN( m_flTongueSeen + STEALTH_TONGUE_INTERVAL, of2_stealth_tongue_time.GetFloat() + 1.0f );
+
+	// One that is on the lookout already (it heard the neck go, it is searching, it is
+	// in a fight) knows what it is looking at, and so does one with its light on it
+	if ( bInBeam || m_iState >= AWARE_SUSPICIOUS || m_bEnemyAbout || m_pOuter->GetEnemy() )
+	{
+		m_flTongueSeen = of2_stealth_tongue_time.GetFloat() + 1.0f;
+	}
+
+	if ( m_flTongueSeen >= of2_stealth_tongue_time.GetFloat() )
+	{
+		m_bEnemyAbout = true;
+		m_flDetection = 1.0f;
+		m_flLastSeenTime = flNow;
+
+		m_bHeardShot = true;
+		m_pOuter->UpdateEnemyMemory( pPlayer, pPlayer->GetAbsOrigin(), pPlayer );
+		m_bHeardShot = false;
+	}
+	else if ( !m_pOuter->GetEnemy() )
+	{
+		AddEvidence( 0.35f, vecSeen, STIM_GLIMPSE );
+	}
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: A squadmate has died. Stock, the whole squad calls it out wherever
 //			they are, which gives a quiet kill away. Now only those say it who
 //			can know: whoever saw it, and anyone already alerted (Overwatch
@@ -1143,17 +1259,19 @@ bool COF2Awareness::WitnessDeath( CBaseEntity *pFriend )
 //=============================================================================
 static ConVar of2_stealth_search_groups( "of2_stealth_search_groups", "1", FCVAR_NONE, "Stealth: NPCs searching the same place split into groups, each with its own slice of the ground, and look at every node once (0 = each wanders to random nodes by itself)." );
 static ConVar of2_stealth_search_group_size( "of2_stealth_search_group_size", "2", FCVAR_NONE, "Stealth: the fewest NPCs in a search group. Those left over join the groups there are." );
-static ConVar of2_stealth_search_view_dist( "of2_stealth_search_view_dist", "700", FCVAR_NONE, "Stealth: a search spot counts as looked at when a searcher has it in view within this distance (and, without night vision, lit)." );
-static ConVar of2_stealth_search_resweep( "of2_stealth_search_resweep", "20", FCVAR_NONE, "Stealth: seconds after a search that does not stand down has looked at everything before it starts over." );
-static ConVar of2_stealth_search_formation( "of2_stealth_search_formation", "5", FCVAR_NONE, "Stealth: the formation a search group keeps round its leader, as the follow behavior numbers them: 0 simple, 1 wide, 3 commander (citizens round the player), 4 tight, 5 medium, 6 sidekick. -1: no formation, each walks to a node beside the leader's." );
+static ConVar of2_stealth_search_view_dist( "of2_stealth_search_view_dist", "220", FCVAR_NONE, "Stealth: a search spot counts as looked at when a searcher has it in view within this distance (and, without night vision, lit)." );
+static ConVar of2_stealth_search_resweep( "of2_stealth_search_resweep", "6", FCVAR_NONE, "Stealth: seconds after a search that does not stand down has looked at everything before it starts over." );
+static ConVar of2_stealth_search_formation( "of2_stealth_search_formation", "-1", FCVAR_NONE, "Stealth: -1: a search group walks in its own formation, the others setting off with the leader for places beside and behind where it is headed. 0 and up: they follow the leader with the engine's follow behavior instead, in that formation of its (0 simple, 1 wide, 3 commander, 4 tight, 5 medium, 6 sidekick)." );
 static ConVar of2_stealth_search_crouch_time( "of2_stealth_search_crouch_time", "2.5", FCVAR_NONE, "Stealth: seconds a searcher stays down to look at a sweep spot marked for crouching." );
+static ConVar of2_stealth_search_links( "of2_stealth_search_links", "1", FCVAR_NONE, "Stealth: a search group's next spot is found by following the links of the node graph from where it stands: a node linked to this one if any is still to be looked at, else the fewest links away (the user's idea). 0: the nearest in a straight line." );
+static ConVar of2_stealth_search_leg( "of2_stealth_search_leg", "500", FCVAR_NONE, "Stealth: about how far a search group walks before it stops to look about: it carries on through linked nodes that keep its heading until it has gone this far. 0: it stops at every node." );
 
 #define SEARCH_MATCH_DIST		300.0f	// stimuli this close together are the same search
 #define SEARCH_IDLE_TIME		15.0f	// a search nobody has asked about for this long is over
 #define SEARCH_MEMBER_TIME		12.0f	// so is a member's part in it
 #define SEARCH_CLAIM_TIME		25.0f	// a group's spot is the group's for this long
-#define SEARCH_WAIT_TIME		14.0f	// how long a leader waits at a spot for the rest of its group
-#define SEARCH_BESIDE_DIST		250.0f	// the others of a group go to spots this near the leader's
+#define SEARCH_WAIT_TIME		5.0f	// how long a leader waits at a spot for the rest of its group
+#define SEARCH_FORMATION_DIST	220.0f	// a leader waits for those of its group further from it than this
 #define SEARCH_ARRIVED_DIST		64.0f	// standing on a spot is having looked at it
 #define SEARCH_LOOKS_PER_THINK	5		// sight lines tried per look
 #define SEARCH_LOOK_INTERVAL	0.3f
@@ -1205,6 +1323,7 @@ struct OF2SearchSpot_t
 	int		iNode;			// ground node, or -1 for a check point
 	EHANDLE	hCheck;
 	bool	bGoal;			// vecGoal is known
+	int		iGoalNode;		// the node vecGoal is at
 	bool	bCrouch;		// a check point to look at from a crouch
 	float	flBearing;		// from the middle of the search
 	float	flDist;
@@ -1219,14 +1338,18 @@ struct OF2SearchGroup_t
 	int		iTarget;		// the spot it is working on, or -1
 	float	flTargetTime;
 	CHandle<CAI_BaseNPC> hLeader;
+	int		iSlice;			// which slice of the ground is its own
+	int		nMoveSerial;	// goes up every time its leader sets off for somewhere new
+	Vector	vecFrom;		// where the leader set off from: the formation trails back that way
 };
 
 struct OF2SearchMember_t
 {
 	CHandle<CAI_BaseNPC> hNPC;
 	int		iGroup;
-	float	flBearing;
 	float	flLastTime;
+	Vector	vecGoal;		// where it was last sent (for the debug drawing)
+	bool	bGoal;
 };
 
 struct OF2Search_t
@@ -1242,14 +1365,18 @@ struct OF2Search_t
 	CUtlVector<OF2SearchSpot_t>		spots;
 	CUtlVector<OF2SearchGroup_t>	groups;
 	CUtlVector<OF2SearchMember_t>	members;
+	CUtlVector< CHandle<CAI_BaseNPC> >	investigators;	// the few who go to the place itself
 };
 
 static CUtlVector<OF2Search_t *> s_Searches;
 
-class COF2SearchList : public CAutoGameSystem
+static void Search_DebugFrame( void );
+
+class COF2SearchList : public CAutoGameSystemPerFrame
 {
 public:
-	COF2SearchList() : CAutoGameSystem( "COF2SearchList" ) {}
+	COF2SearchList() : CAutoGameSystemPerFrame( "COF2SearchList" ) {}
+	virtual void FrameUpdatePostEntityThink( void )	{ Search_DebugFrame(); }
 	virtual void LevelShutdownPostEntity( void )	{ s_Searches.PurgeAndDeleteElements(); }
 };
 static COF2SearchList s_SearchList;
@@ -1277,7 +1404,9 @@ static OF2Search_t *Search_Find( const Vector &vecCenter )
 			continue;
 		}
 
-		if ( ( pSearch->vecCenter - vecCenter ).Length2D() <= SEARCH_MATCH_DIST && fabs( pSearch->vecCenter.z - vecCenter.z ) <= STEALTH_NODE_MAX_DZ )
+		// (Anywhere on the ground a search covers is that search: one whose own evidence
+		// pointed a little way off was left searching by itself)
+		if ( ( pSearch->vecCenter - vecCenter ).Length2D() <= MAX( SEARCH_MATCH_DIST, pSearch->flRadius ) && fabs( pSearch->vecCenter.z - vecCenter.z ) <= STEALTH_NODE_MAX_DZ )
 			return pSearch;
 	}
 
@@ -1338,6 +1467,7 @@ static void Search_AddSpot( OF2Search_t *pSearch, const Vector &vecPos, const Ve
 	spot.iNode = iNode;
 	spot.hCheck = pCheck;
 	spot.bGoal = ( pCheck == NULL );
+	spot.iGoalNode = iNode;
 	COF2CheckPoint *pCheckPoint = dynamic_cast<COF2CheckPoint *>( pCheck );
 	spot.bCrouch = pCheckPoint && pCheckPoint->m_bCrouch;
 	Vector vecFromCenter = vecPos - pSearch->vecCenter;
@@ -1408,51 +1538,91 @@ static void Search_Build( OF2Search_t *pSearch, float flRadius )
 }
 
 //-----------------------------------------------------------------------------
-// Purpose: Who is in which group. Members are taken in the order they stand
-//			round the middle, so a group is NPCs that are near each other, and
-//			the slices are handed out the same way round.
+// Purpose: Who is in which group. In the order they joined, so that a group
+//			stays the same NPCs when others turn up (sorted by where they stood,
+//			as it was at first, everyone changed group whenever one more came),
+//			and the first of a group leads it. The slices go to the groups the
+//			way their leaders stand round the middle.
 //-----------------------------------------------------------------------------
-static int __cdecl Search_MemberSort( const OF2SearchMember_t *pA, const OF2SearchMember_t *pB )
-{
-	return ( pA->flBearing < pB->flBearing ) ? -1 : ( pA->flBearing > pB->flBearing ) ? 1 : 0;
-}
-
 static void Search_Regroup( OF2Search_t *pSearch )
 {
-	for ( int i = 0; i < pSearch->members.Count(); i++ )
-	{
-		OF2SearchMember_t &member = pSearch->members[i];
-		CAI_BaseNPC *pNPC = member.hNPC.Get();
-		member.flBearing = pNPC ? UTIL_VecToYaw( pNPC->GetAbsOrigin() - pSearch->vecCenter ) : 0.0f;
-	}
-	pSearch->members.Sort( Search_MemberSort );
+	CUtlVector<OF2SearchGroup_t> old;
+	old.AddVectorToTail( pSearch->groups );
 
 	int nMembers = pSearch->members.Count();
-	int nGroups = MAX( 1, nMembers / MAX( of2_stealth_search_group_size.GetInt(), 1 ) );
+	int nSize = MAX( of2_stealth_search_group_size.GetInt(), 1 );
+	int nGroups = MAX( 1, nMembers / nSize );
 
 	pSearch->groups.SetCount( nGroups );
 	for ( int i = 0; i < nGroups; i++ )
 	{
-		pSearch->groups[i].iTarget = -1;
-		pSearch->groups[i].flTargetTime = gpGlobals->curtime;
-		pSearch->groups[i].hLeader = NULL;
+		OF2SearchGroup_t &group = pSearch->groups[i];
+		group.iTarget = -1;
+		group.flTargetTime = gpGlobals->curtime;
+		group.hLeader = NULL;
+		group.iSlice = i;
+		group.nMoveSerial = 0;
+		group.vecFrom = pSearch->vecCenter;
 	}
 
 	for ( int i = 0; i < nMembers; i++ )
 	{
-		pSearch->members[i].iGroup = i * nGroups / nMembers;
+		// (Those left over join the last group)
+		pSearch->members[i].iGroup = MIN( i / nSize, nGroups - 1 );
 
-		// The same one leads a group however often the groups are made again
 		OF2SearchGroup_t &group = pSearch->groups[pSearch->members[i].iGroup];
-		CAI_BaseNPC *pNPC = pSearch->members[i].hNPC.Get();
-		CAI_BaseNPC *pLeader = group.hLeader.Get();
-		if ( pNPC && ( !pLeader || pNPC->entindex() < pLeader->entindex() ) )
+		if ( !group.hLeader.Get() )
 		{
-			group.hLeader = pNPC;
+			group.hLeader = pSearch->members[i].hNPC;
 		}
 	}
 
-	pSearch->flBaseBearing = nMembers ? pSearch->members[0].flBearing : 0.0f;
+	// A group whose leader is who it was carries on where it was going
+	for ( int i = 0; i < nGroups; i++ )
+	{
+		OF2SearchGroup_t &group = pSearch->groups[i];
+		for ( int j = 0; j < old.Count(); j++ )
+		{
+			if ( group.hLeader.Get() && old[j].hLeader.Get() == group.hLeader.Get() )
+			{
+				group.iTarget = old[j].iTarget;
+				group.flTargetTime = old[j].flTargetTime;
+				group.nMoveSerial = old[j].nMoveSerial;
+				group.vecFrom = old[j].vecFrom;
+			}
+		}
+	}
+
+	// Slices: the first group's is where its leader stands, the others' follow round
+	// in the order their leaders do
+	float flBearing[32];
+	int nRanked = MIN( nGroups, (int)ARRAYSIZE( flBearing ) );
+	float flBase = 0.0f;
+	for ( int i = 0; i < nRanked; i++ )
+	{
+		CAI_BaseNPC *pLeader = pSearch->groups[i].hLeader.Get();
+		float flYaw = pLeader ? UTIL_VecToYaw( pLeader->GetAbsOrigin() - pSearch->vecCenter ) : 0.0f;
+		if ( i == 0 )
+		{
+			flBase = flYaw;
+		}
+		flBearing[i] = AngleNormalizePositive( flYaw - flBase );
+	}
+
+	for ( int i = 0; i < nRanked; i++ )
+	{
+		int nBefore = 0;
+		for ( int j = 0; j < nRanked; j++ )
+		{
+			if ( flBearing[j] < flBearing[i] || ( flBearing[j] == flBearing[i] && j < i ) )
+			{
+				nBefore++;
+			}
+		}
+		pSearch->groups[i].iSlice = nBefore;
+	}
+
+	pSearch->flBaseBearing = flBase - 180.0f / nGroups;
 
 	if ( !pSearch->bByArea )
 	{
@@ -1508,9 +1678,10 @@ static OF2SearchMember_t *Search_Member( OF2Search_t *pSearch, CAI_BaseNPC *pNPC
 		OF2SearchMember_t member;
 		member.hNPC = pNPC;
 		member.iGroup = 0;
-		member.flBearing = 0.0f;
 		member.flLastTime = gpGlobals->curtime;
-		pSearch->members.AddToTail( member );
+		member.vecGoal = pNPC->GetAbsOrigin();
+		member.bGoal = false;
+		iMember = pSearch->members.AddToTail( member );
 		bChanged = true;
 	}
 
@@ -1529,6 +1700,122 @@ static OF2SearchMember_t *Search_Member( OF2Search_t *pSearch, CAI_BaseNPC *pNPC
 
 	pSearch->members[iMember].flLastTime = gpGlobals->curtime;
 	return &pSearch->members[iMember];
+}
+
+static OF2Search_t *Search_FindOrStart( const Vector &vecCenter, float flRadius )
+{
+	OF2Search_t *pSearch = Search_Find( vecCenter );
+	if ( !pSearch )
+	{
+		pSearch = new OF2Search_t;
+		pSearch->vecCenter = vecCenter;
+		pSearch->flBaseBearing = 0.0f;
+		pSearch->iLookNext = 0;
+		s_Searches.AddToTail( pSearch );
+		Search_Build( pSearch, flRadius );
+	}
+	else if ( flRadius > pSearch->flRadius + 100.0f )
+	{
+		// It has been a while: they may have got further
+		Search_Build( pSearch, flRadius );
+	}
+
+	pSearch->flLastTime = gpGlobals->curtime;
+	return pSearch;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A place in the formation behind whoever goes first: left and right
+//			of where that one is headed and a little back, then a second row.
+//			nRank: 0 for the first of the others.
+//-----------------------------------------------------------------------------
+static Vector Search_SlotGoal( const Vector &vecFrom, const Vector &vecTo, int nRank )
+{
+	static const float s_flBack[] = { 56.0f, 56.0f, 128.0f, 128.0f, 190.0f };
+	static const float s_flSide[] = { 64.0f, -64.0f, 64.0f, -64.0f, 0.0f };
+
+	Vector vecDir = vecTo - vecFrom;
+	vecDir.z = 0.0f;
+	if ( VectorNormalize( vecDir ) < 1.0f )
+	{
+		vecDir.Init( 1.0f, 0.0f, 0.0f );
+	}
+	Vector vecRight( vecDir.y, -vecDir.x, 0.0f );
+
+	nRank = clamp( nRank, 0, (int)ARRAYSIZE( s_flBack ) - 1 );
+	Vector vecSlot = vecTo - vecDir * s_flBack[nRank] + vecRight * s_flSide[nRank];
+
+	// Not into a wall
+	CTraceFilterWorldOnly filter;
+	trace_t tr;
+	Vector vecUp( 0, 0, 32 );
+	UTIL_TraceLine( vecTo + vecUp, vecSlot + vecUp, MASK_NPCSOLID_BRUSHONLY, &filter, &tr );
+	if ( tr.fraction < 1.0f )
+	{
+		vecSlot = vecTo + ( vecSlot - vecTo ) * MAX( tr.fraction - 0.25f, 0.0f );
+	}
+
+	return vecSlot;
+}
+
+// Which of the others in its group this member is: 0, 1, 2...
+static int Search_RankOf( OF2Search_t *pSearch, OF2SearchMember_t *pMember )
+{
+	CAI_BaseNPC *pLeader = pSearch->groups[pMember->iGroup].hLeader.Get();
+	int nRank = 0;
+
+	for ( int i = 0; i < pSearch->members.Count(); i++ )
+	{
+		if ( &pSearch->members[i] == pMember )
+			break;
+
+		if ( pSearch->members[i].iGroup == pMember->iGroup && pSearch->members[i].hNPC.Get() != pLeader )
+		{
+			nRank++;
+		}
+	}
+
+	return nRank;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: A noise sent everyone who heard it to the same spot, to stand in each
+//			other (the user saw it). Now the first few to turn up go and look at
+//			the place itself, side by side (*pSlot); the others get on with the
+//			ground round it. False: this one is not among those few.
+//-----------------------------------------------------------------------------
+static bool OF2Search_Investigates( CAI_BaseNPC *pNPC, const Vector &vecCenter, float flRadius, int *pSlot )
+{
+	OF2Search_t *pSearch = Search_FindOrStart( vecCenter, flRadius );
+	Search_Member( pSearch, pNPC );
+
+	for ( int i = pSearch->investigators.Count() - 1; i >= 0; i-- )
+	{
+		CAI_BaseNPC *pOther = pSearch->investigators[i].Get();
+		if ( !pOther || !pOther->IsAlive() )
+		{
+			pSearch->investigators.Remove( i );
+		}
+	}
+
+	int iSlot = -1;
+	for ( int i = 0; i < pSearch->investigators.Count(); i++ )
+	{
+		if ( pSearch->investigators[i].Get() == pNPC )
+		{
+			iSlot = i;
+		}
+	}
+
+	if ( iSlot < 0 && pSearch->investigators.Count() < MAX( of2_stealth_search_group_size.GetInt(), 2 ) )
+	{
+		CHandle<CAI_BaseNPC> hNPC;
+		hNPC = pNPC;
+		iSlot = pSearch->investigators.AddToTail( hNPC );
+	}
+
+	*pSlot = MAX( iSlot, 0 );
+	return iSlot >= 0;
 }
 
 //-----------------------------------------------------------------------------
@@ -1561,42 +1848,218 @@ static bool Search_FindCheckGoal( OF2Search_t *pSearch, OF2SearchSpot_t &check )
 		flBest = flDist;
 		check.vecGoal = spot.vecGoal;
 		check.bGoal = true;
+		check.iGoalNode = spot.iNode;
 	}
 
 	return check.bGoal;
 }
 
 //-----------------------------------------------------------------------------
+// Purpose: The group's next spot by way of the node graph (the user's idea):
+//			out from the node it stands at along the links a soldier can walk,
+//			one step at a time, until a step reaches spots still to be looked
+//			at; of those, the nearest. So the next spot is linked to this one
+//			whenever there is such a spot, and otherwise the fewest links away,
+//			and the group works its way along the graph instead of jumping
+//			across the room. -1: none it can walk to.
+//-----------------------------------------------------------------------------
+#define SEARCH_LINK_NODES	3000	// as many nodes as it follows links through
+
+static int Search_NextByLinks( OF2Search_t *pSearch, CAI_BaseNPC *pNPC, int iGroup, bool bOwnSlice )
+{
+	int nNodes = g_pBigAINet ? g_pBigAINet->NumNodes() : 0;
+	if ( nNodes <= 0 )
+		return -1;
+
+	const OF2SearchGroup_t &group = pSearch->groups[iGroup];
+	Vector vecOrigin = pNPC->GetAbsOrigin();
+	float flNow = gpGlobals->curtime;
+
+	// Which spot is to be had at which node (a sweep spot: at the node it is looked at from)
+	CUtlVector<int> spotAtNode;
+	spotAtNode.SetCount( nNodes );
+	for ( int i = 0; i < nNodes; i++ )
+	{
+		spotAtNode[i] = -1;
+	}
+
+	bool bAny = false;
+	for ( int i = 0; i < pSearch->spots.Count(); i++ )
+	{
+		OF2SearchSpot_t &spot = pSearch->spots[i];
+		if ( spot.bViewed || spot.bSkip )
+			continue;
+
+		int iSlice = Search_SliceOf( pSearch, spot );
+		if ( bOwnSlice && iSlice >= 0 && iSlice != group.iSlice )
+			continue;
+
+		bool bTaken = false;
+		for ( int g = 0; g < pSearch->groups.Count() && !bTaken; g++ )
+		{
+			bTaken = ( g != iGroup && pSearch->groups[g].iTarget == i && flNow - pSearch->groups[g].flTargetTime < SEARCH_CLAIM_TIME );
+		}
+		if ( bTaken )
+			continue;
+
+		if ( spot.iNode < 0 && !Search_FindCheckGoal( pSearch, spot ) )
+		{
+			spot.bSkip = true;
+			continue;
+		}
+
+		if ( spot.iGoalNode < 0 || spot.iGoalNode >= nNodes )
+			continue;
+
+		// (The place the mapper marked before the node it is looked at from)
+		int iHave = spotAtNode[spot.iGoalNode];
+		if ( iHave < 0 || spot.iNode < 0 )
+		{
+			spotAtNode[spot.iGoalNode] = i;
+			bAny = true;
+		}
+	}
+
+	if ( !bAny )
+		return -1;
+
+	int iStart = g_pBigAINet->NearestNodeToPoint( pNPC, vecOrigin, false );
+	if ( iStart == NO_NODE )
+		return -1;
+
+	CUtlVector<short> steps;
+	steps.SetCount( nNodes );
+	for ( int i = 0; i < nNodes; i++ )
+	{
+		steps[i] = -1;
+	}
+
+	CUtlVector<int> queue;
+	queue.AddToTail( iStart );
+	steps[iStart] = 0;
+
+	int iBest = -1;
+	float flBest = FLT_MAX;
+	int nBestSteps = -1;
+
+	for ( int iHead = 0; iHead < queue.Count() && iHead < SEARCH_LINK_NODES; iHead++ )
+	{
+		int iNode = queue[iHead];
+
+		// Everything this many steps out has been weighed: the nearest of it is the one
+		if ( nBestSteps >= 0 && steps[iNode] > nBestSteps )
+			break;
+
+		int iSpot = spotAtNode[iNode];
+		if ( iSpot >= 0 )
+		{
+			float flDist = pSearch->spots[iSpot].vecGoal.DistTo( vecOrigin ) - ( ( pSearch->spots[iSpot].iNode < 0 ) ? 200.0f : 0.0f );
+			if ( flDist < flBest )
+			{
+				flBest = flDist;
+				iBest = iSpot;
+				nBestSteps = steps[iNode];
+			}
+		}
+
+		CAI_Node *pNode = g_pBigAINet->GetNode( iNode, false );
+		for ( int i = 0; pNode && i < pNode->NumLinks(); i++ )
+		{
+			CAI_Link *pLink = pNode->GetLinkByIndex( i );
+			if ( !pLink || !( pLink->m_iAcceptedMoveTypes[HULL_HUMAN] & bits_CAP_MOVE_GROUND ) )
+				continue;
+
+			int iNext = pLink->DestNodeID( iNode );
+			if ( iNext < 0 || iNext >= nNodes || steps[iNext] >= 0 )
+				continue;
+
+			steps[iNext] = steps[iNode] + 1;
+			queue.AddToTail( iNext );
+		}
+	}
+
+	// That is where the leg starts. Carry it on through linked nodes still to be looked
+	// at for as long as they keep its heading, so that the group walks a stretch and
+	// looks about at the end of it, instead of stopping, turning and forming up again at
+	// every node (the user: "like rubber balls bouncing sideways in a room"). What it
+	// passes it sees on the way; a place the mapper marked is always a stop.
+	if ( iBest >= 0 && pSearch->spots[iBest].iNode >= 0 )
+	{
+		int iNode = pSearch->spots[iBest].iNode;
+		Vector vecAt = pSearch->spots[iBest].vecGoal;
+		Vector vecDir = vecAt - vecOrigin;
+		vecDir.z = 0.0f;
+		float flLength = VectorNormalize( vecDir );
+
+		for ( int nStep = 0; nStep < 6 && flLength < of2_stealth_search_leg.GetFloat(); nStep++ )
+		{
+			CAI_Node *pNode = g_pBigAINet->GetNode( iNode, false );
+			int iNextSpot = -1;
+			float flBestDot = 0.5f;
+			Vector vecNextDir = vecDir;
+			float flNextDist = 0.0f;
+
+			for ( int i = 0; pNode && i < pNode->NumLinks(); i++ )
+			{
+				CAI_Link *pLink = pNode->GetLinkByIndex( i );
+				if ( !pLink || !( pLink->m_iAcceptedMoveTypes[HULL_HUMAN] & bits_CAP_MOVE_GROUND ) )
+					continue;
+
+				int iNext = pLink->DestNodeID( iNode );
+				if ( iNext < 0 || iNext >= nNodes || spotAtNode[iNext] < 0 || pSearch->spots[spotAtNode[iNext]].iNode < 0 )
+					continue;
+
+				Vector vecStep = pSearch->spots[spotAtNode[iNext]].vecGoal - vecAt;
+				vecStep.z = 0.0f;
+				float flDist = VectorNormalize( vecStep );
+				float flDot = DotProduct( vecStep, vecDir );
+				if ( flDist > 1.0f && flDot > flBestDot )
+				{
+					flBestDot = flDot;
+					iNextSpot = spotAtNode[iNext];
+					vecNextDir = vecStep;
+					flNextDist = flDist;
+				}
+			}
+
+			if ( iNextSpot < 0 )
+				break;
+
+			iBest = iNextSpot;
+			iNode = pSearch->spots[iBest].iNode;
+			vecAt = pSearch->spots[iBest].vecGoal;
+			vecDir = vecNextDir;
+			flLength += flNextDist;
+		}
+	}
+
+	return iBest;
+}
+
+//-----------------------------------------------------------------------------
 // Purpose: Where this NPC goes next. False: nothing left to look at (or no
 //			nodes), and the caller does as it did before all this.
+//
+//			A group moves as one. Its leader picks the next spot; that puts the
+//			group's move number up, which breaks into what the others are doing
+//			(COF2Awareness::UpdateFormation), and they ask here in turn and are
+//			given their places beside and behind where the leader is headed. So
+//			all of them set off within a think of each other and walk there side
+//			by side, and the leader does not pick again until they are with it.
 //-----------------------------------------------------------------------------
 static bool OF2Search_Pick( CAI_BaseNPC *pNPC, const Vector &vecCenter, float flRadius, OF2SearchPick_t *pPick )
 {
 	pPick->bCrouch = false;
-	OF2Search_t *pSearch = Search_Find( vecCenter );
-	if ( !pSearch )
-	{
-		pSearch = new OF2Search_t;
-		pSearch->vecCenter = vecCenter;
-		pSearch->flBaseBearing = 0.0f;
-		pSearch->iLookNext = 0;
-		s_Searches.AddToTail( pSearch );
-		Search_Build( pSearch, flRadius );
-	}
-	else if ( flRadius > pSearch->flRadius + 100.0f )
-	{
-		// It has been a while: they may have got further
-		Search_Build( pSearch, flRadius );
-	}
+	pPick->bFace = false;
 
-	pSearch->flLastTime = gpGlobals->curtime;
-
+	OF2Search_t *pSearch = Search_FindOrStart( vecCenter, flRadius );
 	OF2SearchMember_t *pMember = Search_Member( pSearch, pNPC );
 	OF2SearchGroup_t &group = pSearch->groups[pMember->iGroup];
 	Vector vecOrigin = pNPC->GetAbsOrigin();
+	float flNow = gpGlobals->curtime;
 
 	// A search that goes on for good looks at everything again after a while
-	if ( pSearch->flDoneTime > 0.0f && gpGlobals->curtime - pSearch->flDoneTime > of2_stealth_search_resweep.GetFloat() )
+	if ( pSearch->flDoneTime > 0.0f && flNow - pSearch->flDoneTime > of2_stealth_search_resweep.GetFloat() )
 	{
 		for ( int i = 0; i < pSearch->spots.Count(); i++ )
 		{
@@ -1606,125 +2069,100 @@ static bool OF2Search_Pick( CAI_BaseNPC *pNPC, const Vector &vecCenter, float fl
 		Search_SetBuckets( pSearch );
 	}
 
-	// A group moves as one: whoever leads it picks where it goes next, and the others
-	// go to the nodes beside that, one each, whether or not the place has been looked
-	// at meanwhile (it usually has, from a distance, long before anyone gets there:
-	// tied to that, everyone ended up picking for themselves and nobody walked together).
 	bool bHasTarget = pSearch->spots.IsValidIndex( group.iTarget );
 	CAI_BaseNPC *pLeader = group.hLeader.Get();
-	bool bLeaderHolds = bHasTarget && pLeader && pLeader->IsAlive() && gpGlobals->curtime - group.flTargetTime < SEARCH_CLAIM_TIME;
 
-	if ( bLeaderHolds && pLeader != pNPC )
+	if ( pLeader != pNPC )
 	{
-		const OF2SearchSpot_t &target = pSearch->spots[group.iTarget];
-
-		// Which of the others in the group it is
-		int nRank = 0;
-		for ( int i = 0; i < pSearch->members.Count(); i++ )
+		// A leader that has led nowhere in a long while is busy with something else
+		bool bLeaderFit = pLeader && pLeader->IsAlive() && !pLeader->GetEnemy() && flNow - group.flTargetTime <= SEARCH_CLAIM_TIME + SEARCH_WAIT_TIME;
+		if ( bLeaderFit )
 		{
-			CAI_BaseNPC *pOther = pSearch->members[i].hNPC.Get();
-			if ( pOther == pNPC )
-				break;
+			int nRank = Search_RankOf( pSearch, pMember );
 
-			if ( pSearch->members[i].iGroup == pMember->iGroup && pOther != pLeader )
+			if ( bHasTarget )
 			{
-				nRank++;
+				const OF2SearchSpot_t &target = pSearch->spots[group.iTarget];
+				pPick->vecGoal = Search_SlotGoal( group.vecFrom, target.vecGoal, nRank );
+				pPick->bFace = ( target.iNode < 0 );
+				pPick->vecFace = target.vecPos;
 			}
-		}
-
-		// The nearest node to the leader's for the first, the next nearest for the second...
-		int iBeside = -1;
-		float flLast = 24.0f;
-		for ( int n = 0; n <= nRank; n++ )
-		{
-			int iNext = -1;
-			float flBest = SEARCH_BESIDE_DIST;
-			for ( int i = 0; i < pSearch->spots.Count(); i++ )
+			else
 			{
-				const OF2SearchSpot_t &spot = pSearch->spots[i];
-				if ( i == group.iTarget || spot.iNode < 0 || spot.bSkip )
-					continue;
-
-				float flDist = spot.vecGoal.DistTo( target.vecGoal );
-				if ( flDist > flLast && flDist < flBest )
-				{
-					flBest = flDist;
-					iNext = i;
-				}
+				// Nowhere in mind yet (it is still at the place itself): by its side
+				pPick->vecGoal = Search_SlotGoal( vecOrigin, pLeader->GetAbsOrigin(), nRank );
+				pPick->vecFace = pPick->vecGoal;
 			}
 
-			if ( iNext < 0 )
-				break;
-
-			iBeside = iNext;
-			flLast = flBest;
+			pMember->vecGoal = pPick->vecGoal;
+			pMember->bGoal = true;
+			return true;
 		}
 
-		pPick->vecGoal = ( iBeside >= 0 ) ? pSearch->spots[iBeside].vecGoal : target.vecGoal;
-		pPick->bFace = ( target.iNode < 0 );
-		pPick->vecFace = target.vecPos;
-		return true;
+		group.hLeader = pNPC;
+		group.flTargetTime = flNow;
+		pLeader = pNPC;
+		bHasTarget = false;
+		group.iTarget = -1;
 	}
 
-	if ( bLeaderHolds && pLeader == pNPC )
+	if ( bHasTarget )
 	{
 		OF2SearchSpot_t &old = pSearch->spots[group.iTarget];
+		bool bFresh = flNow - group.flTargetTime < SEARCH_CLAIM_TIME;
 		bool bArrived = old.vecGoal.DistTo( vecOrigin ) < 150.0f;
 
-		if ( !bArrived )
+		if ( bFresh && !bArrived )
 		{
 			// (Something broke in on the way: carry on to it)
 			pPick->vecGoal = old.vecGoal;
 			pPick->bFace = ( old.iNode < 0 );
 			pPick->bCrouch = old.bCrouch;
 			pPick->vecFace = old.vecPos;
+			pMember->vecGoal = pPick->vecGoal;
+			pMember->bGoal = true;
 			return true;
 		}
 
-		// There, and it still has not been looked at: it cannot be
+		// There (or never got there), and it still has not been looked at: it cannot be
 		if ( !old.bViewed )
 		{
 			old.bSkip = true;
 		}
 
-		// It does not go on without the others: wait here until they have caught up
+		// It does not go on without the others: wait here until they are with it
 		// (for a while: one of them may be stuck)
-		if ( gpGlobals->curtime - group.flTargetTime < SEARCH_WAIT_TIME )
+		if ( bFresh && flNow - group.flTargetTime < SEARCH_WAIT_TIME )
 		{
 			for ( int i = 0; i < pSearch->members.Count(); i++ )
 			{
 				CAI_BaseNPC *pOther = pSearch->members[i].hNPC.Get();
 				if ( pOther && pOther != pNPC && pSearch->members[i].iGroup == pMember->iGroup &&
-					pOther->GetAbsOrigin().DistTo( vecOrigin ) > SEARCH_BESIDE_DIST + 100.0f )
+					pOther->GetAbsOrigin().DistTo( vecOrigin ) > SEARCH_FORMATION_DIST )
 				{
 					pPick->vecGoal = vecOrigin;
-					pPick->bFace = false;
 					pPick->vecFace = vecOrigin;
 					return true;
 				}
 			}
 		}
 	}
-	else if ( bHasTarget && pLeader == pNPC && !pSearch->spots[group.iTarget].bViewed )
-	{
-		// Did not get there in all that time
-		pSearch->spots[group.iTarget].bSkip = true;
-	}
-
-	// Not the one who leads its group, and the leader has nowhere in mind yet: to the leader
-	if ( pLeader && pLeader != pNPC && pLeader->IsAlive() && !pLeader->GetEnemy() &&
-		gpGlobals->curtime - group.flTargetTime <= SEARCH_CLAIM_TIME + SEARCH_WAIT_TIME )
-	{
-		pPick->vecGoal = pLeader->GetAbsOrigin();
-		pPick->bFace = false;
-		pPick->vecFace = pPick->vecGoal;
-		return true;
-	}
 
 	for ( int iTry = 0; iTry < 4; iTry++ )
 	{
 		int iBest = -1;
 		float flBest = FLT_MAX;
+
+		// Along the node graph from where it stands: its own slice, then anyone's. What
+		// it cannot walk to that way is left to the straight-line pick below.
+		if ( of2_stealth_search_links.GetBool() )
+		{
+			iBest = Search_NextByLinks( pSearch, pNPC, pMember->iGroup, true );
+			if ( iBest < 0 )
+			{
+				iBest = Search_NextByLinks( pSearch, pNPC, pMember->iGroup, false );
+			}
+		}
 
 		for ( int iPass = 0; iPass < 2 && iBest < 0; iPass++ )
 		{
@@ -1736,21 +2174,23 @@ static bool OF2Search_Pick( CAI_BaseNPC *pNPC, const Vector &vecCenter, float fl
 
 				// Its own slice first, then anyone's
 				int iSlice = Search_SliceOf( pSearch, spot );
-				if ( iPass == 0 && iSlice >= 0 && iSlice != pMember->iGroup )
+				if ( iPass == 0 && iSlice >= 0 && iSlice != group.iSlice )
 					continue;
 
 				// Another group is on its way there
 				bool bTaken = false;
 				for ( int g = 0; g < pSearch->groups.Count() && !bTaken; g++ )
 				{
-					bTaken = ( g != pMember->iGroup && pSearch->groups[g].iTarget == i && gpGlobals->curtime - pSearch->groups[g].flTargetTime < SEARCH_CLAIM_TIME );
+					bTaken = ( g != pMember->iGroup && pSearch->groups[g].iTarget == i && flNow - pSearch->groups[g].flTargetTime < SEARCH_CLAIM_TIME );
 				}
 				if ( bTaken )
 					continue;
 
-				// Outwards from the middle, without crossing the slice for it. The
-				// places the mapper marked come before the ground round them.
-				float flScore = spot.flDist + 0.3f * spot.vecGoal.DistTo( vecOrigin ) - ( ( spot.iNode < 0 ) ? 200.0f : 0.0f );
+				// The nearest to where the group stands, so that it walks a line through
+				// its slice instead of crossing it back and forth; nearer the middle first
+				// where there is a choice, so the line runs outwards. The places the
+				// mapper marked come before the ground round them.
+				float flScore = spot.vecGoal.DistTo( vecOrigin ) + 0.25f * spot.flDist - ( ( spot.iNode < 0 ) ? 200.0f : 0.0f );
 				if ( flScore < flBest )
 				{
 					flBest = flScore;
@@ -1777,18 +2217,149 @@ static bool OF2Search_Pick( CAI_BaseNPC *pNPC, const Vector &vecCenter, float fl
 		}
 
 		group.iTarget = iBest;
-		group.flTargetTime = gpGlobals->curtime;
+		group.flTargetTime = flNow;
 		group.hLeader = pNPC;
+		group.vecFrom = vecOrigin;
+		group.nMoveSerial++;
 
 		pPick->vecGoal = best.vecGoal;
 		pPick->bFace = ( best.iNode < 0 );
 		pPick->bCrouch = best.bCrouch;
 		pPick->vecFace = best.vecPos;
+		pMember->vecGoal = pPick->vecGoal;
+		pMember->bGoal = true;
 		return true;
 	}
 
 	group.iTarget = -1;
+	pMember->bGoal = false;
 	return false;
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: of2_stealth_search_debug: the searches as the code has them. Every
+//			sweep spot in the map; for each search its middle, reach and slices,
+//			its nodes (white: not looked at, green: looked at, orange: given up
+//			on) and sweep spots (the same, bigger, red while not looked at); and
+//			its members, boxed in their group's colour, leader and others named,
+//			with a line from each to where it has been sent and the leader's
+//			spot marked as the group's next.
+//-----------------------------------------------------------------------------
+static ConVar of2_stealth_search_debug( "of2_stealth_search_debug", "0", FCVAR_NONE, "Stealth: draw the searches. Sweep spots (orange boxes); a search's middle, reach and slices; its nodes, white until looked at, then green (orange: given up on); searchers boxed in their group's colour and named leader or follower; a line from each to where it is going, and the group's next spot marked." );
+
+#define SEARCH_DEBUG_INTERVAL	0.1f
+
+static void Search_DrawDebug( void )
+{
+	static const int s_nColors[][3] = { { 255, 70, 70 }, { 70, 160, 255 }, { 255, 225, 0 }, { 210, 90, 255 }, { 0, 255, 200 }, { 255, 140, 0 } };
+	float flTime = SEARCH_DEBUG_INTERVAL + 0.03f;
+	Vector vecBox( 8, 8, 8 );
+
+	// Every sweep spot there is
+	for ( int i = 0; i < COF2CheckPoint::s_List.Count(); i++ )
+	{
+		COF2CheckPoint *pCheck = COF2CheckPoint::s_List[i];
+		NDebugOverlay::Box( pCheck->GetAbsOrigin(), -vecBox, vecBox, 255, 160, 0, 20, flTime );
+		NDebugOverlay::Text( pCheck->GetAbsOrigin() + Vector( 0, 0, 14 ), pCheck->m_bDisabled ? "sweep spot (off)" : ( pCheck->m_bCrouch ? "sweep spot (crouch)" : "sweep spot" ), false, flTime );
+	}
+
+	for ( int s = 0; s < s_Searches.Count(); s++ )
+	{
+		OF2Search_t *pSearch = s_Searches[s];
+		if ( gpGlobals->curtime - pSearch->flLastTime > 2.0f )
+			continue;
+
+		Vector vecCenter = pSearch->vecCenter + Vector( 0, 0, 8 );
+		int nGroups = MAX( pSearch->groups.Count(), 1 );
+
+		NDebugOverlay::Cross3D( vecCenter, 24.0f, 255, 255, 255, true, flTime );
+		NDebugOverlay::Circle( vecCenter, QAngle( -90, 0, 0 ), pSearch->flRadius, 255, 255, 255, 0, true, flTime );
+
+		char szText[96];
+		Q_snprintf( szText, sizeof( szText ), "search: %d searchers, %d groups%s", pSearch->members.Count(), pSearch->groups.Count(), ( pSearch->flDoneTime > 0.0f ) ? ", all looked at" : "" );
+		NDebugOverlay::Text( vecCenter + Vector( 0, 0, 30 ), szText, false, flTime );
+
+		// Where one group's ground ends and the next one's starts, in the colour of
+		// the group whose slice begins there
+		for ( int g = 0; g < nGroups && nGroups > 1; g++ )
+		{
+			const int *pColor = s_nColors[g % ARRAYSIZE( s_nColors )];
+			float flYaw = pSearch->flBaseBearing + pSearch->groups[g].iSlice * ( 360.0f / nGroups );
+			Vector vecDir;
+			AngleVectors( QAngle( 0, flYaw, 0 ), &vecDir );
+			NDebugOverlay::Line( vecCenter, vecCenter + vecDir * pSearch->flRadius, pColor[0], pColor[1], pColor[2], true, flTime );
+		}
+
+		for ( int i = 0; i < pSearch->spots.Count(); i++ )
+		{
+			const OF2SearchSpot_t &spot = pSearch->spots[i];
+			bool bSweep = ( spot.iNode < 0 );
+
+			int r = 255, g = 255, b = 255;
+			if ( spot.bViewed )
+			{
+				r = 0; b = 0;
+			}
+			else if ( spot.bSkip )
+			{
+				g = 140; b = 0;
+			}
+			else if ( bSweep )
+			{
+				g = 0; b = 0;
+			}
+
+			Vector vecSize = bSweep ? Vector( 12, 12, 12 ) : Vector( 4, 4, 4 );
+			NDebugOverlay::Box( spot.vecPos, -vecSize, vecSize, r, g, b, spot.bViewed ? 90 : 40, flTime );
+		}
+
+		for ( int i = 0; i < pSearch->members.Count(); i++ )
+		{
+			const OF2SearchMember_t &member = pSearch->members[i];
+			CAI_BaseNPC *pNPC = member.hNPC.Get();
+			if ( !pNPC || !pSearch->groups.IsValidIndex( member.iGroup ) )
+				continue;
+
+			const OF2SearchGroup_t &group = pSearch->groups[member.iGroup];
+			const int *pColor = s_nColors[member.iGroup % ARRAYSIZE( s_nColors )];
+			bool bLeader = ( group.hLeader.Get() == pNPC );
+
+			NDebugOverlay::Box( pNPC->GetAbsOrigin(), pNPC->WorldAlignMins(), pNPC->WorldAlignMaxs(), pColor[0], pColor[1], pColor[2], bLeader ? 70 : 25, flTime );
+
+			Q_snprintf( szText, sizeof( szText ), "group %d %s", member.iGroup + 1, bLeader ? "LEADER" : "follower" );
+			NDebugOverlay::Text( pNPC->EyePosition() + Vector( 0, 0, 34 ), szText, false, flTime );
+
+			Vector vecChest = pNPC->WorldSpaceCenter();
+			if ( bLeader && pSearch->spots.IsValidIndex( group.iTarget ) )
+			{
+				const OF2SearchSpot_t &target = pSearch->spots[group.iTarget];
+				NDebugOverlay::Line( vecChest, target.vecGoal + Vector( 0, 0, 8 ), pColor[0], pColor[1], pColor[2], true, flTime );
+				NDebugOverlay::Cross3D( target.vecGoal + Vector( 0, 0, 8 ), 20.0f, pColor[0], pColor[1], pColor[2], true, flTime );
+				if ( target.iNode < 0 )
+				{
+					NDebugOverlay::Line( target.vecGoal + Vector( 0, 0, 8 ), target.vecPos, pColor[0], pColor[1], pColor[2], true, flTime );
+				}
+
+				Q_snprintf( szText, sizeof( szText ), "group %d next", member.iGroup + 1 );
+				NDebugOverlay::Text( target.vecGoal + Vector( 0, 0, 24 ), szText, false, flTime );
+			}
+			else if ( !bLeader && member.bGoal )
+			{
+				NDebugOverlay::Line( vecChest, member.vecGoal + Vector( 0, 0, 8 ), pColor[0], pColor[1], pColor[2], true, flTime );
+				NDebugOverlay::Cross3D( member.vecGoal + Vector( 0, 0, 8 ), 6.0f, pColor[0], pColor[1], pColor[2], true, flTime );
+			}
+		}
+	}
+}
+
+static void Search_DebugFrame( void )
+{
+	static float s_flNext = 0.0f;
+	if ( !of2_stealth_search_debug.GetBool() || ( gpGlobals->curtime < s_flNext && gpGlobals->curtime > s_flNext - 1.0f ) )
+		return;
+
+	s_flNext = gpGlobals->curtime + SEARCH_DEBUG_INTERVAL;
+	Search_DrawDebug();
 }
 
 //-----------------------------------------------------------------------------
@@ -1807,7 +2378,7 @@ static void OF2Search_Look( COF2Awareness *pAware, CAI_BaseNPC *pNPC, const Vect
 
 	Vector vecOrigin = pNPC->GetAbsOrigin();
 	float flViewDist = of2_stealth_search_view_dist.GetFloat();
-	bool bDebug = of2_stealth_debug.GetBool();
+	bool bDebug = false;	// (of2_stealth_search_debug draws all of this now)
 	int nSpots = pSearch->spots.Count();
 	int nLooks = 0;
 	int nLeft = 0;
@@ -1932,34 +2503,19 @@ static void OF2Search_Look( COF2Awareness *pAware, CAI_BaseNPC *pNPC, const Vect
 
 //-----------------------------------------------------------------------------
 // Purpose: Joins the search round this place (starting it if need be) and says
-//			who leads this NPC's group. NULL: it does, or nobody fit to.
+//			who leads this NPC's group (NULL: it does, or nobody fit to) and which
+//			move the group is on.
 //-----------------------------------------------------------------------------
-static CAI_BaseNPC *OF2Search_Join( CAI_BaseNPC *pNPC, const Vector &vecCenter, float flRadius )
+static CAI_BaseNPC *OF2Search_Join( CAI_BaseNPC *pNPC, const Vector &vecCenter, float flRadius, int *pSerial )
 {
-	OF2Search_t *pSearch = Search_Find( vecCenter );
-	if ( !pSearch )
-	{
-		pSearch = new OF2Search_t;
-		pSearch->vecCenter = vecCenter;
-		pSearch->flBaseBearing = 0.0f;
-		pSearch->iLookNext = 0;
-		s_Searches.AddToTail( pSearch );
-		Search_Build( pSearch, flRadius );
-	}
-
-	pSearch->flLastTime = gpGlobals->curtime;
-
+	OF2Search_t *pSearch = Search_FindOrStart( vecCenter, flRadius );
 	OF2SearchMember_t *pMember = Search_Member( pSearch, pNPC );
 	OF2SearchGroup_t &group = pSearch->groups[pMember->iGroup];
-	CAI_BaseNPC *pLeader = pSearch->groups[pMember->iGroup].hLeader.Get();
 
-	// A leader that has not led anywhere in a long while is busy with something else
-	if ( pLeader && pLeader != pNPC && gpGlobals->curtime - group.flTargetTime > SEARCH_CLAIM_TIME + SEARCH_WAIT_TIME )
-	{
-		group.hLeader = pNPC;
-		group.flTargetTime = gpGlobals->curtime;
-		return NULL;
-	}
+	// (Another group is another move too)
+	*pSerial = group.nMoveSerial * 64 + pMember->iGroup;
+
+	CAI_BaseNPC *pLeader = group.hLeader.Get();
 	if ( !pLeader || pLeader == pNPC || !pLeader->IsAlive() || pLeader->GetEnemy() )
 		return NULL;
 
@@ -1994,11 +2550,28 @@ void COF2Awareness::UpdateFormation( CAI_FollowBehavior &follow )
 {
 	CAI_BaseNPC *pLeader = NULL;
 
-	if ( IsEnabled() && of2_stealth_search_groups.GetBool() && of2_stealth_search_formation.GetInt() >= 0 &&
+	if ( IsEnabled() && of2_stealth_search_groups.GetBool() &&
 		m_iState == AWARE_SEARCHING && m_bVisited && !m_pOuter->GetEnemy() &&
 		!m_pOuter->IsInAScript() && m_pOuter->GetState() != NPC_STATE_SCRIPT )
 	{
-		pLeader = OF2Search_Join( m_pOuter, m_vecStimulus, SearchRadius() );
+		int nSerial = 0;
+		pLeader = OF2Search_Join( m_pOuter, m_vecStimulus, SearchRadius(), &nSerial );
+
+		// Its leader has set off for somewhere new: so does it, now, not when it has
+		// finished looking about where it is
+		if ( pLeader && nSerial != m_nSearchSerial )
+		{
+			m_bChanged = true;
+			m_flChangedTime = gpGlobals->curtime;
+		}
+		m_nSearchSerial = nSerial;
+	}
+
+	// With the engine's follow behavior instead, if asked for (it starts the others
+	// off only once the leader is well ahead, which reads as catching up, not as a group)
+	if ( pLeader && of2_stealth_search_formation.GetInt() < 0 )
+	{
+		pLeader = NULL;
 	}
 
 	if ( pLeader )
@@ -2075,6 +2648,12 @@ bool COF2Awareness::PickSearchPoint( Vector *pResult )
 		{
 			m_flSearchEndTime = MIN( m_flSearchEndTime, gpGlobals->curtime + 2.0f );
 		}
+
+		// One that does not stand down stays where it is and watches until the search
+		// starts over (it used to wander from node to node by itself meanwhile, which
+		// with a few of them looked like chickens in a yard)
+		if ( OF2Search_IsDone( m_vecStimulus ) )
+			return false;
 	}
 
 	CAI_Network *pNetwork = m_pOuter->GetNavigator()->GetNetwork();
@@ -2212,6 +2791,12 @@ OF2StealthSched_t COF2Awareness::SelectSchedule( bool bHasDuties )
 		{
 			m_pOuter->SetIdealState( NPC_STATE_ALERT );
 		}
+		// Only the first few go to the place itself; the others start on the ground round it
+		m_iInvestigateSlot = 0;
+		if ( !m_bVisited && of2_stealth_search_groups.GetBool() && !OF2Search_Investigates( m_pOuter, m_vecStimulus, SearchRadius(), &m_iInvestigateSlot ) )
+		{
+			m_bVisited = true;
+		}
 		return m_bVisited ? STEALTH_SCHED_SEARCH : STEALTH_SCHED_INVESTIGATE;
 
 	case AWARE_UNAWARE:
@@ -2283,7 +2868,15 @@ bool COF2Awareness::StartTask( OF2StealthTask_t task )
 		return true;
 
 	case STEALTH_TASK_GET_PATH_TO_STIMULUS:
-		bPath = GetPathTo( m_vecStimulus, IsUrgent() );
+		{
+			// Side by side, not all onto the one spot
+			Vector vecGoal = m_vecStimulus;
+			if ( m_iInvestigateSlot > 0 && of2_stealth_search_groups.GetBool() )
+			{
+				vecGoal = Search_SlotGoal( m_pOuter->GetAbsOrigin(), m_vecStimulus, m_iInvestigateSlot - 1 );
+			}
+			bPath = GetPathTo( vecGoal, IsUrgent() );
+		}
 		break;
 
 	case STEALTH_TASK_GET_SEARCH_PATH:
@@ -2508,12 +3101,12 @@ ConVar of2_police_flashlight_range( "of2_police_flashlight_range", "600", FCVAR_
 ConVar of2_police_flashlight_fov( "of2_police_flashlight_fov", "50", FCVAR_NONE, "Cone of a head flashlight in degrees: what it lets them see, and how wide the light lands." );
 ConVar of2_police_flashlight_beam( "of2_police_flashlight_beam", "10", FCVAR_NONE, "How visible the cone of light from a head flashlight is in the air (0-255; 0 for none)." );
 ConVar of2_police_flashlight_beam_length( "of2_police_flashlight_beam_length", "320", FCVAR_NONE, "How far from the head that cone reaches before it has faded out. It widens at the light's own angle (of2_police_flashlight_fov)." );
-ConVar of2_police_flashlight_budget( "of2_police_flashlight_budget", "4", FCVAR_NONE, "How many head flashlights may be projected lights at once: the lit ones nearest the player. The others have the pool of light. -1: no limit." );
+ConVar of2_police_flashlight_budget( "of2_police_flashlight_budget", "-1", FCVAR_NONE, "How many head flashlights may be projected lights at once: the lit ones nearest the player. The others have the pool of light. -1: no limit, all of them are (the user's choice: the pool looked glitchy beside the projected ones). Only the first few in view have shadows (-numshadowtextures, 5); the rest shine through walls." );
 ConVar of2_police_flashlight_projected_dist( "of2_police_flashlight_projected_dist", "1500", FCVAR_NONE, "Further from the player than this, a head flashlight has the pool of light instead of the projected one." );
 ConVar of2_police_flashlight_projected( "of2_police_flashlight_projected", "1", FCVAR_NONE, "1: a head flashlight is a projected texture, which casts shadows, instead of a pool of light. Shines backwards too on any surface not drawn by the mod's own world shader. Can be switched while one is on." );
 ConVar of2_police_flashlight_dark( "of2_police_flashlight_dark", "0.2", FCVAR_NONE, "A head flashlight is on where the brightness is below this (0-1, the 'light' figure of of2_stealth_light_debug)." );
 ConVar of2_police_flashlight_hold( "of2_police_flashlight_hold", "6", FCVAR_NONE, "Until the game knows how dark it is where the NPC stands: seconds its flashlight stays on after it has calmed down." );
-ConVar of2_police_flashlight_glow_offset( "of2_police_flashlight_glow_offset", "-3 -4.5 1", FCVAR_NONE, "Where the glow sprite sits from between the eyes: forward, left, up. Read when the light is first switched on." );
+ConVar of2_police_flashlight_glow_offset( "of2_police_flashlight_glow_offset", "-3 -4.5 1", FCVAR_NONE, "Where the lamp sits from between the eyes: forward, left, up. Its glow, its light and the cone in the air all start there. Read when the light is switched on." );
 ConVar of2_police_flashlight_glow_scale( "of2_police_flashlight_glow_scale", "0.1", FCVAR_NONE, "Size of the glow sprite. Read when the light is first switched on." );
 
 #define OF2_FLASHLIGHT_GLOW		"sprites/light_glow03.vmt"
@@ -2635,6 +3228,11 @@ bool COF2Flashlight::Lights( const Vector &vecPos )
 	if ( m_flAmbientLight < 0.0f || m_flAmbientLight >= of2_police_flashlight_dark.GetFloat() + 0.08f )
 		return true;
 
+	return InBeam( vecPos );
+}
+
+bool COF2Flashlight::InBeam( const Vector &vecPos )
+{
 	if ( !m_bOn || !m_pOuter )
 		return false;
 
@@ -2740,6 +3338,11 @@ void COF2Flashlight::Set( bool bOn )
 		bool bHasEyes = GetRay( &vecOrigin, &vecForward );
 		int iAttachment = bHasEyes ? m_pOuter->LookupAttachment( "eyes" ) : 0;
 
+		// The lamp is where its glow is, on the side of the head, and the light and the
+		// cone come from there (from between the eyes, it looked wrong beside the glow)
+		Vector vecLamp( -3, -4.5, 1 );
+		UTIL_StringToVector( vecLamp.Base(), of2_police_flashlight_glow_offset.GetString() );
+
 		// A projected texture, with shadows, for the few nearest the player
 		bool bProjected = WantsProjected();
 		if ( bProjected )
@@ -2767,7 +3370,7 @@ void COF2Flashlight::Set( bool bOn )
 					if ( iAttachment > 0 )
 					{
 						pLight->SetParent( m_pOuter, iAttachment );
-						pLight->SetLocalOrigin( vec3_origin );
+						pLight->SetLocalOrigin( vecLamp );
 					}
 					else
 					{
@@ -2815,7 +3418,7 @@ void COF2Flashlight::Set( bool bOn )
 				if ( iAttachment > 0 )
 				{
 					pCone->SetParent( m_pOuter, iAttachment );
-					pCone->SetLocalOrigin( vec3_origin );
+					pCone->SetLocalOrigin( vecLamp );
 				}
 				else
 				{
@@ -2833,8 +3436,7 @@ void COF2Flashlight::Set( bool bOn )
 			CSprite *pGlow = CSprite::SpriteCreate( OF2_FLASHLIGHT_GLOW, m_pOuter->GetAbsOrigin(), false );
 			if ( pGlow )
 			{
-				Vector vecOffset( -3, -4.5, 1 );
-				UTIL_StringToVector( vecOffset.Base(), of2_police_flashlight_glow_offset.GetString() );
+				Vector vecOffset = vecLamp;
 
 				if ( iAttachment > 0 )
 				{

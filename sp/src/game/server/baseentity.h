@@ -135,6 +135,7 @@ enum Class_T
 	CLASS_EARTH_FAUNA,
 	CLASS_HACKED_ROLLERMINE,
 	CLASS_COMBINE_HUNTER,
+	CLASS_ICHTHYOSAUR,		// OF2: last, so the numbers in saved games stay as they were
 
 	NUM_AI_CLASSES
 };

@@ -177,6 +177,9 @@ ConVar of2_barnacle_prey( "of2_barnacle_prey", "1", FCVAR_NONE, "The Barnacle's 
 ConVar of2_barnacle_eat_health( "of2_barnacle_eat_health", "10", FCVAR_NONE, "Health the player gets when the Barnacle eats a headcrab." );
 ConVar of2_barnacle_flick_time( "of2_barnacle_flick_time", "1.37", FCVAR_NONE, "How long the whip of the Barnacle in the hand takes when it snaps a neck, start to finish. The neck goes a little over two fifths of the way through, with the mouth at the top." );
 ConVar of2_barnacle_alert_delay( "of2_barnacle_alert_delay", "1", FCVAR_NONE, "How long after the Barnacle's tongue lands on someone they take to notice, in seconds: the time there is to break their neck unnoticed." );
+ConVar of2_barnacle_snap_noise( "of2_barnacle_snap_noise", "350", FCVAR_NONE, "How far a neck broken by the Barnacle is heard by NPCs, in units. Whoever hears it looks that way, and is then quick to make out the tongue." );
+ConVar of2_barnacle_yank( "of2_barnacle_yank", "100", FCVAR_NONE, "Someone who knows the player is there and has the Barnacle's tongue land on them (or notices while it holds them) takes hold of it and yanks: the player is pulled about this far towards them and the tongue lets go. 0: they do not." );
+ConVar of2_barnacle_yank_delay( "of2_barnacle_yank_delay", "0.35", FCVAR_NONE, "How long they take to do that, in seconds." );
 ConVar of2_barnacle_strain_damage( "of2_barnacle_strain_damage", "30", FCVAR_NONE, "Damage a second the Barnacle's tongue does, pulled tight, to someone it can't kill outright: an elite soldier, or anyone it has by something other than the head or chest." );
 ConVar of2_barnacle_corpses( "of2_barnacle_corpses", "1", FCVAR_NONE, "While the player has the Barnacle, what dies leaves a body the tongue can take hold of (a ragdoll on the server, as the gravity gun's charged form makes them). 0: bodies are as in Half-Life 2, only there for the eye." );
 ConVar of2_barnacle_corpse_speed( "of2_barnacle_corpse_speed", "0.5", FCVAR_NONE, "With a body on its tongue the Barnacle reels and pulls at this share of its usual speed." );
@@ -221,6 +224,13 @@ bool OF2_BarnacleWantsCorpses( void )
 	CBasePlayer *pPlayer = UTIL_GetLocalPlayer();
 	return pPlayer && pPlayer->Weapon_OwnsThisType( "weapon_barnacle" ) != NULL;
 }
+
+//-----------------------------------------------------------------------------
+// Stealth: a tongue that is out can be seen, and it leads back to whoever
+// holds the barnacle. Up to nMax places along it, the tip first, leaving out
+// the stretch nearest the player (seeing that is seeing the player).
+//-----------------------------------------------------------------------------
+int OF2_BarnacleTonguePoints( Vector *pPoints, int nMax, CBasePlayer **ppOwner );
 
 static bool IsCorpse( CBaseEntity *pEntity )
 {
@@ -557,14 +567,36 @@ int CBarnacleRope::GetLine( Vector *pLine ) const
 
 void CBarnacleRope::Relay( int nCount )
 {
-	Vector vecPos[OF2_TONGUE_NODES];
-	Vector vecMove[OF2_TONGUE_NODES];
-	int nSource = m_nCount;
+	// The way the tongue lies is not the straight lines from point to point:
+	// where one of those goes through a corner or a beam, it is the way round
+	// (OF2_RopeLinkAround, as ApplyConstraints has it). Laid along the straight
+	// lines, the new points there were put inside the wall, and a point inside
+	// something is not stopped by it: reeled in over a ledge, which lays it out
+	// again every few units, the tongue sank into the ledge bit by bit.
+	Vector vecPos[OF2_TONGUE_NODES * 3];
+	Vector vecMove[OF2_TONGUE_NODES * 3];
+	int nSource = 0;
+
+	CTraceFilterTongueDrape filter( m_pDrapeIgnore, m_nDrapeIgnore, of2_barnacle_drape.GetBool() );
+	bool bWorld = m_bCollide && !m_bFeeding;
+	bool bCorners = bWorld && of2_barnacle_corners.GetBool();
 
 	for ( int i = 0; i < m_nCount; i++ )
 	{
-		vecPos[i] = m_Nodes[i].m_vPos;
-		vecMove[i] = m_Nodes[i].m_vPos - m_Nodes[i].m_vPrevPos;
+		vecPos[nSource] = m_Nodes[i].m_vPos;
+		vecMove[nSource] = m_Nodes[i].m_vPos - m_Nodes[i].m_vPrevPos;
+		nSource++;
+
+		Vector vecRound[2];
+		int nRound = ( bCorners && i < m_nCount - 1 ) ?
+			OF2_RopeLinkAround( m_Nodes[i].m_vPos, m_Nodes[i + 1].m_vPos, BARNACLE_TONGUE_WIDTH * 0.5f, MASK_SOLID, &filter, vecRound ) : 0;
+		for ( int j = 0; j < nRound; j++ )
+		{
+			// (moving as the points either side of it do)
+			vecPos[nSource] = vecRound[j];
+			vecMove[nSource] = ( vecMove[nSource - 1 - j] + ( m_Nodes[i + 1].m_vPos - m_Nodes[i + 1].m_vPrevPos ) ) * 0.5f;
+			nSource++;
+		}
 	}
 
 	if ( m_bFeeding )
@@ -606,6 +638,18 @@ void CBarnacleRope::Relay( int nCount )
 
 		Vector vecAt = vecPos[iLeg] + ( vecPos[iLeg + 1] - vecPos[iLeg] ) * t;
 		Vector vecMoved = vecMove[iLeg] + ( vecMove[iLeg + 1] - vecMove[iLeg] ) * t;
+
+		// And should something still be in the way of that stretch (no way round
+		// it was found), the point stays on the near side of it
+		if ( bWorld && i > 0 && i < nCount - 1 )
+		{
+			trace_t tr;
+			UTIL_TraceLine( vecPos[iLeg], vecAt, MASK_SOLID, &filter, &tr );
+			if ( !tr.startsolid && tr.fraction < 1.0f )
+			{
+				vecAt = tr.endpos + tr.plane.normal * ( BARNACLE_TONGUE_WIDTH * 0.5f );
+			}
+		}
 
 		m_Nodes[i].m_vPos = vecAt;
 		m_Nodes[i].m_vPrevPos = vecAt - vecMoved;
@@ -702,13 +746,20 @@ void CBarnacleRope::ApplyConstraints( CSimplePhysics::CNode *pNodes, int nNodes 
 	// is the way out to the corner and on from it (OF2_RopeLinkCorner), and each
 	// is drawn towards the corner. Looked for from where the points were a tick
 	// ago, which is clear of things. Nothing changes for a link with a clear line.
+	// Something thin between the two (a beam, a railing) has a way round with two
+	// places to go by, one off each of its sides (OF2_RopeLinkAround): the near
+	// point is drawn towards the first and the far one towards the second. Held
+	// to each other straight through it, they slid down its two sides until
+	// the line between them was under it, and the tongue fell through.
 	CTraceFilterTongueDrape filter( m_pDrapeIgnore, m_nDrapeIgnore, of2_barnacle_drape.GetBool() );
 	bool bCorner[OF2_TONGUE_NODES];
-	Vector vecCorner[OF2_TONGUE_NODES];
+	Vector vecCorner[OF2_TONGUE_NODES][2];
+	float flCornerGap[OF2_TONGUE_NODES];
 	bool bCorners = m_bCollide && nPasses > 0 && of2_barnacle_corners.GetBool();
 	for ( int i = 0; i < iTip; i++ )
 	{
-		bCorner[i] = bCorners && OF2_RopeLinkCorner( pNodes[i].m_vPrevPos, pNodes[i + 1].m_vPrevPos, BARNACLE_TONGUE_WIDTH * 0.5f, MASK_SOLID, &filter, &vecCorner[i] );
+		bCorner[i] = bCorners && OF2_RopeLinkAround( pNodes[i].m_vPrevPos, pNodes[i + 1].m_vPrevPos, BARNACLE_TONGUE_WIDTH * 0.5f, MASK_SOLID, &filter, vecCorner[i] ) > 0;
+		flCornerGap[i] = bCorner[i] ? vecCorner[i][0].DistTo( vecCorner[i][1] ) : 0.0f;
 	}
 
 	// Neighbours no further apart than the tongue between them. Slack is fine.
@@ -731,11 +782,11 @@ void CBarnacleRope::ApplyConstraints( CSimplePhysics::CNode *pNodes, int nNodes 
 
 			if ( bCorner[i] )
 			{
-				Vector vecToNear = vecCorner[i] - pNodes[i].m_vPos;
-				Vector vecToFar = vecCorner[i] - pNodes[i + 1].m_vPos;
+				Vector vecToNear = vecCorner[i][0] - pNodes[i].m_vPos;
+				Vector vecToFar = vecCorner[i][1] - pNodes[i + 1].m_vPos;
 				float flNearWay = VectorNormalize( vecToNear );
 				float flFarWay = VectorNormalize( vecToFar );
-				float flOver = flNearWay + flFarWay - m_flSegment;
+				float flOver = flNearWay + flFarWay + flCornerGap[i] - m_flSegment;
 				if ( flOver <= 0.0f )
 					continue;
 
@@ -951,7 +1002,36 @@ void CBarnacleRope::ApplyConstraints( CSimplePhysics::CNode *pNodes, int nNodes 
 	{
 		trace_t tr;
 		UTIL_TraceLine( pNodes[i].m_vPrevPos, pNodes[i].m_vPos, MASK_SOLID, &filter, &tr );
-		if ( tr.startsolid || tr.fraction == 1.0f )
+		if ( tr.startsolid )
+		{
+			// It is inside something, and from in there nothing stops it: it went
+			// wherever the tongue pulled it, through the map. If that something is
+			// the map, the point is put back on the side of it a neighbour is on
+			// (the one before it, already seen to this tick; failing that, the one
+			// after, where that was a tick ago). Only for the map: a crate that
+			// rolls over the tongue is not to shove it about.
+			CTraceFilterWorldAndPropsOnly worldFilter;
+			for ( int j = 0; j < 2; j++ )
+			{
+				if ( j == 1 && i >= iTip )
+					break;
+
+				trace_t trOut;
+				UTIL_TraceLine( ( j == 0 ) ? pNodes[i - 1].m_vPos : pNodes[i + 1].m_vPrevPos, pNodes[i].m_vPos, MASK_SOLID_BRUSHONLY, &worldFilter, &trOut );
+				if ( trOut.startsolid )
+					continue;
+
+				if ( trOut.fraction < 1.0f )
+				{
+					pNodes[i].m_vPos = trOut.endpos + trOut.plane.normal * ( BARNACLE_TONGUE_WIDTH * 0.5f );
+					pNodes[i].m_vPrevPos = pNodes[i].m_vPos;
+				}
+				break;
+			}
+			continue;
+		}
+
+		if ( tr.fraction == 1.0f )
 			continue;
 
 		// (its middle rests half its thickness off the surface)
@@ -1134,6 +1214,8 @@ private:
 	void	UpdateTongue( void );
 	void	DebugDraw( void );
 
+	friend int OF2_BarnacleTonguePoints( Vector *pPoints, int nMax, CBasePlayer **ppOwner );
+
 private:
 	COF2Tether		m_Tether;
 	CBarnacleRope	m_Rope;
@@ -1172,6 +1254,7 @@ private:
 	// ...whether it is the head it has them by (nothing else gets hurt), and when they notice
 	bool		m_bPreyHead;
 	float		m_flPreyAlertTime;
+	float		m_flYankTime;		// when the one the tongue is on pulls back; 0: not about to
 	// ...or, if it is a zombie, takes its headcrab off instead
 	bool		m_bPreyZombie;
 	float		m_flNextStrain;
@@ -1277,6 +1360,7 @@ CWeaponBarnacle::CWeaponBarnacle()
 	m_bPreyZombie = false;
 	m_bPreyHead = false;
 	m_flPreyAlertTime = 0.0f;
+	m_flYankTime = 0.0f;
 	m_flNextStrain = 0.0f;
 	m_flSnapTime = 0.0f;
 	m_bTipBig = false;
@@ -1871,6 +1955,7 @@ bool CWeaponBarnacle::StickToNPC( CHL2_Player *pPlayer, CAI_BaseNPC *pNPC, const
 	// a moment (UpdatePrey), which is the time there is to break their neck
 	// without anyone the wiser (the user asked for a second)
 	m_flPreyAlertTime = gpGlobals->curtime + of2_barnacle_alert_delay.GetFloat();
+	m_flYankTime = 0.0f;
 
 	if ( m_bTipBig )
 	{
@@ -2018,6 +2103,52 @@ void CWeaponBarnacle::UpdatePrey( CHL2_Player *pPlayer )
 	{
 		m_flPreyAlertTime = 0.0f;
 		pNPC->UpdateEnemyMemory( pPlayer, pPlayer->GetAbsOrigin() );
+	}
+
+	// One that knows the player is there does not stand for it (the user's idea): a
+	// moment after the tongue is on them, or after they notice, they take hold of it
+	// and yank. The player comes a little way towards them and the tongue is lost. So
+	// the tongue is for the unwary; not for a neck already whipping, nor zombies.
+	if ( of2_barnacle_yank.GetFloat() > 0.0f && m_flSnapTime == 0.0f && !m_bPreyZombie && pNPC->GetEnemy() == pPlayer )
+	{
+		if ( m_flYankTime == 0.0f )
+		{
+			m_flYankTime = gpGlobals->curtime + of2_barnacle_yank_delay.GetFloat();
+
+			// The pull is their melee swing (a soldier's melee_gunhit; the user asked for
+			// it), started now so that it lands as the player comes
+			if ( pNPC->SelectWeightedSequence( ACT_MELEE_ATTACK1 ) != ACTIVITY_NOT_AVAILABLE )
+			{
+				pNPC->SetSchedule( SCHED_MELEE_ATTACK1 );
+			}
+		}
+		else if ( gpGlobals->curtime >= m_flYankTime )
+		{
+			m_flYankTime = 0.0f;
+
+			Vector vecPull = pNPC->WorldSpaceCenter() - pPlayer->WorldSpaceCenter();
+			vecPull.z = 0.0f;
+			VectorNormalize( vecPull );
+
+			// Off the ground for a moment, or friction eats it: about a third of a second
+			// in the air and a short slide make up the distance
+			float flSpeed = of2_barnacle_yank.GetFloat() * 2.2f;
+			Vector vecVelocity = vecPull * flSpeed + Vector( 0, 0, 110 );
+
+			StartRetract();
+
+			pPlayer->SetGroundEntity( NULL );
+			pPlayer->ApplyAbsVelocityImpulse( vecVelocity );
+			pPlayer->ViewPunch( QAngle( -9.0f, random->RandomFloat( -5.0f, 5.0f ), 0.0f ) );
+
+			pNPC->EmitSound( dynamic_cast<CNPC_Combine *>( pNPC ) ? "NPC_Combine.WeaponBash" : "NPC_Metropolice.Shove" );
+			pNPC->UpdateEnemyMemory( pPlayer, pPlayer->GetAbsOrigin() );
+			return;
+		}
+	}
+	else
+	{
+		m_flYankTime = 0.0f;
 	}
 
 	// The barnacle is already whipping: the neck goes when its mouth is at the
@@ -2215,6 +2346,13 @@ void CWeaponBarnacle::SnapPrey( CHL2_Player *pPlayer, CAI_BaseNPC *pNPC )
 	CPASAttenuationFilter filter( vecCrack, "Weapon_Barnacle.BreakNeck" );
 	CBaseEntity::EmitSound( filter, SOUND_FROM_WORLD, "Weapon_Barnacle.BreakNeck", &vecCrack );
 	PlayReaction( BARNACLE_FLINCH_SEQUENCE );
+	// It is heard, a little way: whoever does looks round, and one that is looking makes
+	// out the tongue at once
+	if ( of2_barnacle_snap_noise.GetInt() > 0 )
+	{
+		CSoundEnt::InsertSound( SOUND_COMBAT, vecPin, of2_barnacle_snap_noise.GetInt(), 0.5f, pPlayer );
+	}
+
 	// Stealth: a squadmate who sees this knows where the tongue comes from, and the
 	// body others may find is the ragdoll made above
 	OF2_KillLeadsTo( pPlayer );
@@ -3369,4 +3507,36 @@ IMotionEvent::simresult_e CWeaponBarnacle::Simulate( IPhysicsMotionController *p
 	angular = angCenterVelocity * ( flPush / deltaTime );
 
 	return SIM_LOCAL_ACCELERATION;
+}
+
+//-----------------------------------------------------------------------------
+// Stealth (of2_stealth.cpp): where the tongue is while it is out
+//-----------------------------------------------------------------------------
+int OF2_BarnacleTonguePoints( Vector *pPoints, int nMax, CBasePlayer **ppOwner )
+{
+	*ppOwner = NULL;
+
+	CBasePlayer *pPlayer = UTIL_GetLocalPlayer();
+	if ( !pPlayer || !pPlayer->IsAlive() || nMax <= 0 )
+		return 0;
+
+	CWeaponBarnacle *pBarnacle = dynamic_cast<CWeaponBarnacle *>( pPlayer->Weapon_OwnsThisType( "weapon_barnacle" ) );
+	if ( !pBarnacle || !pBarnacle->m_bTongueOut )
+		return 0;
+
+	// From the tip back to a quarter of the way out from the barnacle
+	int nNodes = pBarnacle->m_Rope.GetCount();
+	int iFirst = nNodes / 4;
+	if ( nNodes < 4 || iFirst >= nNodes - 1 )
+		return 0;
+
+	int nPoints = MIN( nMax, nNodes - iFirst );
+	for ( int i = 0; i < nPoints; i++ )
+	{
+		int iNode = ( nPoints > 1 ) ? ( nNodes - 1 ) - i * ( ( nNodes - 1 ) - iFirst ) / ( nPoints - 1 ) : nNodes - 1;
+		pPoints[i] = pBarnacle->m_Rope.GetPos( iNode );
+	}
+
+	*ppOwner = pPlayer;
+	return nPoints;
 }

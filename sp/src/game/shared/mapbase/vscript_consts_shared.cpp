@@ -562,6 +562,7 @@ void RegisterSharedScriptConstants()
 	ScriptRegisterConstant( g_pScriptVM, CLASS_EARTH_FAUNA, "Used by birds and other terrestrial animals." );
 	ScriptRegisterConstant( g_pScriptVM, CLASS_HACKED_ROLLERMINE, "Used by rollermines which were hacked by Alyx." );
 	ScriptRegisterConstant( g_pScriptVM, CLASS_COMBINE_HUNTER, "Used by Combine hunters." );
+	ScriptRegisterConstant( g_pScriptVM, CLASS_ICHTHYOSAUR, "OF2: used by ichthyosaurs." );
 
 #elif defined( HL1_DLL )
 

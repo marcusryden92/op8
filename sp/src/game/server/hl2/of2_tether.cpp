@@ -36,7 +36,7 @@
 #define TETHER_ARRIVE_DIST		1.0f
 
 ConVar of2_tether_pivot_offset( "of2_tether_pivot_offset", "1.5", FCVAR_NONE, "How far off the corner a tether's pivot is put." );
-ConVar of2_tether_pivot_mindist( "of2_tether_pivot_mindist", "8", FCVAR_NONE, "A tether gets no new pivot closer than this to the one before it." );
+ConVar of2_tether_pivot_mindist( "of2_tether_pivot_mindist", "3", FCVAR_NONE, "A tether gets no new pivot closer than this to the one before it. (It was 8: round a beam less than 5 thick the second corner was that close to the first, got no pivot, and the line went through the beam.)" );
 ConVar of2_tether_unwrap_angle( "of2_tether_unwrap_angle", "12", FCVAR_NONE, "A tether's pivot can go once the line bends less than this many degrees at it (and the way past it is clear)." );
 ConVar of2_tether_unwrap_clear( "of2_tether_unwrap_clear", "6", FCVAR_NONE, "A tether's pivot also goes, however much the line bends at it, once the straight line past it is clear and misses the pivot by this much." );
 ConVar of2_tether_wrap_props( "of2_tether_wrap_props", "1", FCVAR_NONE, "Tethers wrap around static props as well as world brushes." );
@@ -306,20 +306,31 @@ bool COF2Tether::FindPivot( const Vector &vecFixed, const Vector &vecMoving, con
 
 		// (if that is nowhere near the line, the second hit was on something else)
 		bool bMeet = CalcDistanceToLineSegment( vecMeet, vecFixed, vecBlocked ) < TETHER_EDGE_DIST;
+
+		// ...unless the line is simply well into the corner: it was blocked a
+		// tick ago too (both ends moved, or a pivot was refused), so there is no
+		// first touch to go by and the line can be any depth in. Then the edge is
+		// still the way round if the line gets to it and on from it. (Without
+		// this the pivot was put on the face where the line went in, and the line
+		// on from there went through the corner.)
+		Vector vecBoth = vecFace1 + vecFace2;
+		Vector vecTry = vecMeet + vecBoth * of2_tether_pivot_offset.GetFloat();
+		trace_t trWay;
+		bool bWay = !IsBlocked( vecFixed, vecTry, &trWay ) && !trWay.startsolid;
+		if ( !bMeet && bWay && !IsBlocked( vecTry, vecBlocked, &trWay ) && !trWay.startsolid )
+		{
+			bMeet = true;
+		}
+
 		if ( bMeet || trTest.endpos.DistToSqr( tr.endpos ) < TETHER_EDGE_DIST * TETHER_EDGE_DIST )
 		{
-			vecOut = vecFace1 + vecFace2;
+			vecOut = vecBoth;
 			vecEdge = CrossProduct( vecFace1, vecFace2 );
 		}
 
-		if ( bMeet )
+		if ( bMeet && bWay )
 		{
-			trace_t trWay;
-			Vector vecTry = vecMeet + vecOut * of2_tether_pivot_offset.GetFloat();
-			if ( !IsBlocked( vecFixed, vecTry, &trWay ) )
-			{
-				vecCorner = vecMeet;
-			}
+			vecCorner = vecMeet;
 		}
 	}
 

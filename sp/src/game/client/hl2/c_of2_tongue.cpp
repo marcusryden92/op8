@@ -44,7 +44,7 @@ ConVar of2_tongue_smooth( "of2_tongue_smooth", "6", FCVAR_NONE, "How many pieces
 ConVar of2_tongue_shine( "of2_tongue_shine", "1.4", FCVAR_NONE, "Strength of the wet highlight along the Barnacle's tongue, as a multiple of the light where it is: over 1 it burns out to white in good light. 0 turns it off." );
 ConVar of2_tongue_shine_width( "of2_tongue_shine_width", "0.45", FCVAR_NONE, "Width of the highlight along the Barnacle's tongue, as a share of the tongue's." );
 ConVar of2_tongue_shine_follow( "of2_tongue_shine_follow", "1", FCVAR_NONE, "How far the highlight on the Barnacle's tongue moves towards the side the light comes from. 0 keeps it down the middle." );
-ConVar of2_tongue_min_light( "of2_tongue_min_light", "0.25", FCVAR_NONE, "The Barnacle's tongue and the climb ropes take on the light where they are, but never get darker than this." );
+ConVar of2_tongue_min_light( "of2_tongue_min_light", "0.02", FCVAR_NONE, "The Barnacle's tongue and the climb ropes take on the light where they are, but never get darker than this. (It was 0.25, which had them glowing in a pitch black room. With night vision on, of2_tongue_min_light_nv.)" );
 ConVar of2_tongue_round( "of2_tongue_round", "0.55", FCVAR_NONE, "How much darker the Barnacle's tongue and the climb ropes get towards their edges, so they read as round. 0 is flat, 1 goes to black." );
 ConVar of2_tongue_side_light( "of2_tongue_side_light", "1", FCVAR_NONE, "How much each side of the Barnacle's tongue and of the climb ropes follows the light falling on it from that side: bright towards a lamp or the sky, dark away from it. 0 is the same all round." );
 ConVar of2_tongue_blob_radius( "of2_tongue_blob_radius", "1.4", FCVAR_NONE, "How thick the Barnacle's tongue gets at its tip, from its middle to its edge (the rest of the tongue is 1). It ends round at that size. 1 is no thickening, 0 a cut-off end." );
@@ -52,6 +52,8 @@ ConVar of2_tongue_blob_length( "of2_tongue_blob_length", "20", FCVAR_NONE, "Over
 ConVar of2_tongue_blob_shade( "of2_tongue_blob_shade", "1", FCVAR_NONE, "How bright the round end of the Barnacle's tongue is next to the rest of it. Under 1 is darker." );
 ConVar of2_tongue_reflect( "of2_tongue_reflect", "0.5", FCVAR_NONE, "How strongly the Barnacle's tongue mirrors its surroundings (the map's cubemaps). 0 turns it off." );
 ConVar of2_tongue_bend_radius( "of2_tongue_bend_radius", "12", FCVAR_NONE, "Where the Barnacle's tongue or a climb rope goes over an edge it is drawn going round it, starting and ending this far either side. 0 turns on the spot." );
+
+ConVar of2_tongue_overlay_map( "of2_tongue_overlay_map", "1", FCVAR_NONE, "The start of the Barnacle's tongue is drawn again in front of the world, so it does not go into a wall the player hangs against. That part ends where the map hides the tongue from the eye. 0: it runs on to the first edge the line to the tip goes over, or to the tip, and shows through walls the tongue lies behind (as before)." );
 
 // The barnacle in the hand (the viewmodel). Not archived.
 ConVar of2_barnacle_world( "of2_barnacle_world", "1", FCVAR_NONE, "Draw the Barnacle in the hand where it is in the world, together with the start of its tongue, so that the tongue comes out of its mouth and not from behind it. 0 draws it as any other weapon, over the tongue." );
@@ -101,6 +103,11 @@ static const float s_flFlickBack[BARNACLE_FLICK_KEYS] = { 0.0f, -0.50f, 0.70f, 1
 #define TONGUE_OVERLAY_HIDDEN	8.0f
 // A point of the tongue counts as in sight if what is in the way is this close to it (it lies on that)
 #define TONGUE_SIGHT_CLEAR		6.0f
+// ...and for the map itself, this close: the tip lies on what it stuck to
+#define TONGUE_SIGHT_CLEAR_MAP	3.0f
+// A stretch of tongue with nothing in its way is drawn out to an edge of the
+// line that pulls from this close to it (all the way), to twice this (not at all)
+#define TONGUE_BEND_NEAR		2.0f
 // A point this close in front of the plane through an edge is at the edge
 #define TONGUE_EDGE_NEAR		0.5f
 // How long the barnacle takes to turn along a tongue that takes the player's weight, and back
@@ -671,9 +678,12 @@ int C_OF2Tongue::DrawModel( int flags )
 	// to the tip
 	Vector vecPoints[1 + OF2_TONGUE_MAX_BENDS + OF2_TONGUE_NODES + TONGUE_MAX_CORNERS];
 	bool bBend[1 + OF2_TONGUE_MAX_BENDS + OF2_TONGUE_NODES + TONGUE_MAX_CORNERS];
+	// (where the server has each of them: see the part drawn in front of the world, below)
+	Vector vecSight[1 + OF2_TONGUE_MAX_BENDS + OF2_TONGUE_NODES + TONGUE_MAX_CORNERS];
 	int nPoints = 0;
 
 	Vector vecMouth = OF2_TetherHoldPos( pPlayer, true );
+	vecSight[nPoints] = vecMouth;
 	OF2_BarnacleMouth( pPlayer, &vecMouth );
 	vecPoints[nPoints] = vecMouth;
 	bBend[nPoints] = false;
@@ -739,6 +749,7 @@ int C_OF2Tongue::DrawModel( int flags )
 		flRawAlong += m_vecNodes[i].DistTo( m_vecNodes[i + 1] );
 		float flShare = clamp( 1.0f - flRawAlong / flReach, 0.0f, 1.0f );
 		vecPoints[nPoints] = m_vecNodes[i] + vecCarry * flShare;
+		vecSight[nPoints] = m_vecNodes[i];
 		bBend[nPoints] = false;
 		flTotal += vecPoints[nPoints].DistTo( vecPoints[nPoints - 1] );
 		nPoints++;
@@ -750,13 +761,20 @@ int C_OF2Tongue::DrawModel( int flags )
 	// way to the tip goes over; where the tongue passes within a point's spacing
 	// of one, it is drawn going out to it and round it. (Further off, it is
 	// still in the air over that edge, or lies over it somewhere else.)
+	// The edges come in order, from the tip's end back, and go into the tongue
+	// in that order: each before the one put in last. (Each used to go wherever
+	// the tongue came nearest it. Two edges of one thin beam are both nearest
+	// the same stretch, and could end up the wrong way round: the tongue was
+	// then drawn out to the far edge, back through the beam to the near one,
+	// and on through it again.)
 	float flSpacing = MAX( flTotal / ( nPoints - 1 ), 4.0f );
+	int iBefore = nPoints - 1;
 	for ( int b = 0; b < nBends; b++ )
 	{
 		int iLink = -1;
 		float flBest = flSpacing;
 		Vector vecAt;
-		for ( int i = 0; i < nPoints - 1; i++ )
+		for ( int i = 0; i < iBefore; i++ )
 		{
 			// (not one put in for another edge)
 			if ( bBend[i] && bBend[i + 1] )
@@ -776,19 +794,49 @@ int C_OF2Tongue::DrawModel( int flags )
 		if ( iLink < 0 )
 			continue;
 
-		// All the way out to the edge from half a spacing in; less from further
-		// off, so that it doesn't jump there as the tongue comes down on it
-		float flPull = clamp( 2.0f - 2.0f * flBest / flSpacing, 0.0f, 1.0f );
+		// Only where the tongue is on the edge: the edge is in the way of that
+		// stretch, or of the way from the edge out to it, or the stretch passes
+		// it as close as the edge stands off its corner. (It used to be drawn
+		// towards the edge from a whole spacing off, more the nearer it came. A
+		// tongue still in the air above an edge, coming down on it in a curve,
+		// got one point pulled down out of that curve: a notch right over the
+		// edge, which the user saw. Left alone until it touches, the curve stays
+		// whole and then lies over the edge as two, one either side.)
+		float flPull = clamp( 2.0f - flBest / TONGUE_BEND_NEAR, 0.0f, 1.0f );
+		if ( flPull < 1.0f )
+		{
+			CTraceFilterWorldAndPropsOnly bendFilter;
+			trace_t tr;
+			UTIL_TraceLine( vecPoints[iLink], vecPoints[iLink + 1], MASK_SOLID_BRUSHONLY, &bendFilter, &tr );
+			bool bBlocked = !tr.startsolid && tr.fraction < 1.0f && tr.endpos.DistTo( vecPoints[iLink + 1] ) > 1.0f;
+			if ( !bBlocked )
+			{
+				UTIL_TraceLine( m_vecBends[b], vecAt, MASK_SOLID_BRUSHONLY, &bendFilter, &tr );
+				bBlocked = !tr.startsolid && tr.fraction < 1.0f && tr.endpos.DistTo( vecAt ) > 1.0f;
+			}
+
+			if ( bBlocked )
+			{
+				flPull = 1.0f;
+			}
+			else if ( flPull <= 0.0f )
+			{
+				continue;
+			}
+		}
 
 		for ( int i = nPoints; i > iLink + 1; i-- )
 		{
 			vecPoints[i] = vecPoints[i - 1];
+			vecSight[i] = vecSight[i - 1];
 			bBend[i] = bBend[i - 1];
 		}
 
 		vecPoints[iLink + 1] = vecAt + ( m_vecBends[b] - vecAt ) * flPull;
+		vecSight[iLink + 1] = vecPoints[iLink + 1];
 		bBend[iLink + 1] = true;
 		nPoints++;
+		iBefore = iLink + 1;
 	}
 
 	// Those are the edges of the line that pulls. The tongue lies over others
@@ -796,35 +844,42 @@ int C_OF2Tongue::DrawModel( int flags )
 	// there the same thing happens: one point on top, the next down the side,
 	// and the line between them through the corner. Wherever the way from one
 	// point to the next is blocked by a corner, it is drawn out to the corner
-	// and round it (OF2_RopeLinkCorner; the server holds the points to each
-	// other the same way).
+	// and round it (OF2_RopeLinkAround; the server holds the points to each
+	// other the same way). Something thin between the two, a beam or a railing,
+	// is gone round by two places, one off each of its sides.
 	if ( of2_rope_corners.GetBool() )
 	{
 		CTraceFilterWorldAndPropsOnly cornerFilter;
 		int nCorners = 0;
-		for ( int i = 0; i < nPoints - 1 && nCorners < TONGUE_MAX_CORNERS; i++ )
+		for ( int i = 0; i < nPoints - 1 && nCorners + 2 <= TONGUE_MAX_CORNERS; i++ )
 		{
 			// (not next to an edge it is drawn round already)
 			if ( bBend[i] || bBend[i + 1] )
 				continue;
 
-			Vector vecCorner;
-			if ( !OF2_RopeLinkCorner( vecPoints[i], vecPoints[i + 1], m_flWidth * 0.5f, MASK_SOLID_BRUSHONLY, &cornerFilter, &vecCorner ) )
+			Vector vecRound[2];
+			int nRound = OF2_RopeLinkAround( vecPoints[i], vecPoints[i + 1], m_flWidth * 0.5f, MASK_SOLID_BRUSHONLY, &cornerFilter, vecRound );
+			if ( nRound <= 0 )
 				continue;
 
-			for ( int j = nPoints; j > i + 1; j-- )
+			for ( int j = nPoints - 1 + nRound; j > i + nRound; j-- )
 			{
-				vecPoints[j] = vecPoints[j - 1];
-				bBend[j] = bBend[j - 1];
+				vecPoints[j] = vecPoints[j - nRound];
+				vecSight[j] = vecSight[j - nRound];
+				bBend[j] = bBend[j - nRound];
 			}
 
-			vecPoints[i + 1] = vecCorner;
-			bBend[i + 1] = true;
-			nPoints++;
-			nCorners++;
+			for ( int j = 0; j < nRound; j++ )
+			{
+				vecPoints[i + 1 + j] = vecRound[j];
+				vecSight[i + 1 + j] = vecRound[j];
+				bBend[i + 1 + j] = true;
+			}
+			nPoints += nRound;
+			nCorners += nRound;
 
 			// (on from the point after the corner)
-			i++;
+			i += nRound;
 		}
 	}
 
@@ -858,6 +913,15 @@ int C_OF2Tongue::DrawModel( int flags )
 	// drawn over them), and in this pass nothing can. So it also ends at the
 	// first point that has one of those between it and the eye; from there on
 	// the tongue is only what the world's pass drew of it.
+	// And the map's walls hide it after all. "That way is clear" is so for the
+	// straight way to the tip, the line that pulls, and the tongue need not lie
+	// along it: loose over a ledge, round a corner with no edge in the line yet,
+	// behind a pillar, all of it was drawn here, in front of the map (the user:
+	// it clips through geometry, the map's own most of all). So it ends too at
+	// the first point the map hides from the eye. That is asked of the point
+	// where the server has it, not where it is drawn: against a wall the player
+	// hangs on, the drawn start of the tongue can be inside the wall, which is
+	// what this pass is for, while the server's is kept out of it.
 	if ( s_bDrawingOverlay )
 	{
 		// (the server lists the edges from the tip's end back)
@@ -866,6 +930,7 @@ int C_OF2Tongue::DrawModel( int flags )
 
 		const Vector &vecEye = CurrentViewOrigin();
 		CTraceFilterTongueSight filter( pPlayer );
+		CTraceFilterWorldAndPropsOnly mapFilter;
 
 		bool bEnds = false;
 		bool bHidden = false;
@@ -882,6 +947,27 @@ int C_OF2Tongue::DrawModel( int flags )
 			}
 
 			float flStretch = vecPoints[i].DistTo( vecPoints[i - 1] );
+
+			UTIL_TraceLine( vecEye, vecSight[i], MASK_OPAQUE, &mapFilter, &tr );
+			if ( of2_tongue_overlay_map.GetBool() && tr.fraction < 1.0f && tr.endpos.DistTo( vecSight[i] ) > TONGUE_SIGHT_CLEAR_MAP )
+			{
+				// Up to where it goes out of sight between the last point and this one
+				float flSeen = 0.0f;
+				float flStep = 0.5f;
+				for ( int k = 0; k < 3; k++, flStep *= 0.5f )
+				{
+					Vector vecAt = vecSight[i - 1] + ( vecSight[i] - vecSight[i - 1] ) * ( flSeen + flStep );
+					UTIL_TraceLine( vecEye, vecAt, MASK_OPAQUE, &mapFilter, &tr );
+					if ( tr.fraction == 1.0f || tr.endpos.DistTo( vecAt ) <= TONGUE_SIGHT_CLEAR_MAP )
+					{
+						flSeen += flStep;
+					}
+				}
+
+				flUpTo += flStretch * flSeen;
+				bEnds = true;
+				break;
+			}
 			if ( nBends > 0 )
 			{
 				float flBefore = DotProduct( vecPoints[i - 1] - vecEdge, vecAlong );
@@ -917,6 +1003,12 @@ int C_OF2Tongue::DrawModel( int flags )
 	if ( bFound && pReflect )
 	{
 		float flReflect = MAX( of2_tongue_reflect.GetFloat(), 0.0f );
+
+		// A cubemap is of the room in its own light, wherever that was made: in the
+		// dark the tongue has nothing to mirror
+		Vector vecMidLight;
+		engine->ComputeLighting( vecPoints[nPoints / 2], NULL, true, vecMidLight, NULL );
+		flReflect *= clamp( LinearToGamma( ( vecMidLight.x + vecMidLight.y + vecMidLight.z ) * ( 1.0f / 3.0f ) ) * 2.0f, 0.0f, 1.0f );
 		pReflect->SetVecValue( flReflect, flReflect, flReflect );
 	}
 

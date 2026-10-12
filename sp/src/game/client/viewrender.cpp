@@ -6699,8 +6699,12 @@ void CUnderWaterView::Setup( const CViewSetup &view, bool bDrawSkybox, const Vis
 	IMaterial *pWaterMaterial = fogInfo.m_pFogVolumeMaterial;
 	if (engine->GetDXSupportLevel() >= 90 )					// screen voerlays underwater are a dx9 feature
 	{
-		IMaterialVar *pScreenOverlayVar = pWaterMaterial->FindVar( "$underwateroverlay", NULL, false );
-		if ( pScreenOverlayVar && ( pScreenOverlayVar->IsDefined() ) )
+		// OF2: a material without the variable gives the material system's shared stand-in, which
+		// anything that sets a variable another material lacks leaves a value in. Read as an
+		// overlay name that was a material nobody has: the whole screen in the missing texture.
+		bool bFoundOverlay = false;
+		IMaterialVar *pScreenOverlayVar = pWaterMaterial->FindVar( "$underwateroverlay", &bFoundOverlay, false );
+		if ( bFoundOverlay && pScreenOverlayVar && ( pScreenOverlayVar->IsDefined() ) )
 		{
 			char const *pOverlayName = pScreenOverlayVar->GetStringValue();
 			if ( pOverlayName[0] != '0' )						// fixme!!!

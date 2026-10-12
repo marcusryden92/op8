@@ -38,6 +38,7 @@ ConVar of2_rope_follow( "of2_rope_follow", "1", FCVAR_REPLICATED, "A loose rope'
 ConVar of2_rope_follow_give( "of2_rope_follow_give", "0.9", FCVAR_REPLICATED, "With of2_rope_follow: how much of each such pull the point before feels. 0: none, and a hanging rope's free end thrashes. 1: all of it; the rope is at its calmest and stiffest." );
 
 ConVar of2_rope_corners( "of2_rope_corners", "1", FCVAR_REPLICATED, "Where the straight line between two points of a rope or tongue goes through a corner (one on a floor, the next over its edge), the rope is held and drawn going round that corner. 0: straight through, as before." );
+ConVar of2_rope_thin( "of2_rope_thin", "1", FCVAR_REPLICATED, "The Barnacle's tongue is held and drawn going round something thin that stands between two of its points (a beam, a railing, a plate: a face either side of the line, where a corner has one each way), over its top if that is near, else round its side. 0: straight through it, as before." );
 ConVar of2_rope_spacing( "of2_rope_spacing", "16", FCVAR_REPLICATED, "About how much rope there is between two points of a loose rope, which has 32 at most. Less follows what it lies on more closely. Read when a rope is laid out: on a grab, on letting go, on map start." );
 
 // Grip, as opposed to ROPE_FRICTION, which only slows what already slides: a
@@ -57,22 +58,33 @@ ConVar of2_rope_grip( "of2_rope_grip", "1.0", FCVAR_REPLICATED, "How well a loos
 // The line is traced from both ends. Blocked both ways, the two faces hit are
 // the ones the corner lies between (as COF2Tether::FindPivot works it out).
 //-----------------------------------------------------------------------------
-bool OF2_RopeLinkCorner( const Vector &vecFrom, const Vector &vecTo, float flStandOff, unsigned int nMask, ITraceFilter *pFilter, Vector *pCorner, Vector *pOut )
+static bool RopeLinkHits( const Vector &vecFrom, const Vector &vecTo, unsigned int nMask, ITraceFilter *pFilter, trace_t *pThere, trace_t *pBack )
 {
-	float flLink = vecFrom.DistTo( vecTo );
-	if ( flLink < 1.0f )
+	if ( vecFrom.DistToSqr( vecTo ) < 1.0f )
 		return false;
 
 	// (a point inside something can't tell where the way out is)
-	trace_t trThere;
-	UTIL_TraceLine( vecFrom, vecTo, nMask, pFilter, &trThere );
-	if ( trThere.startsolid || trThere.fraction == 1.0f )
+	UTIL_TraceLine( vecFrom, vecTo, nMask, pFilter, pThere );
+	if ( pThere->startsolid || pThere->fraction == 1.0f )
 		return false;
 
-	trace_t trBack;
-	UTIL_TraceLine( vecTo, vecFrom, nMask, pFilter, &trBack );
-	if ( trBack.startsolid || trBack.fraction == 1.0f )
+	UTIL_TraceLine( vecTo, vecFrom, nMask, pFilter, pBack );
+	if ( pBack->startsolid || pBack->fraction == 1.0f )
 		return false;
+
+	return true;
+}
+
+static bool RopeLinkClear( const Vector &vecFrom, const Vector &vecTo, unsigned int nMask, ITraceFilter *pFilter )
+{
+	trace_t tr;
+	UTIL_TraceLine( vecFrom, vecTo, nMask, pFilter, &tr );
+	return !tr.startsolid && tr.fraction == 1.0f;
+}
+
+static bool RopeCornerBetween( const Vector &vecFrom, const Vector &vecTo, const trace_t &trThere, const trace_t &trBack, float flStandOff, Vector *pCorner, Vector *pOut )
+{
+	float flLink = vecFrom.DistTo( vecTo );
 
 	const Vector &vecFace1 = trThere.plane.normal;
 	const Vector &vecFace2 = trBack.plane.normal;
@@ -97,6 +109,102 @@ bool OF2_RopeLinkCorner( const Vector &vecFrom, const Vector &vecTo, float flSta
 	}
 
 	return true;
+}
+
+bool OF2_RopeLinkCorner( const Vector &vecFrom, const Vector &vecTo, float flStandOff, unsigned int nMask, ITraceFilter *pFilter, Vector *pCorner, Vector *pOut )
+{
+	trace_t trThere, trBack;
+	if ( !RopeLinkHits( vecFrom, vecTo, nMask, pFilter, &trThere, &trBack ) )
+		return false;
+
+	return RopeCornerBetween( vecFrom, vecTo, trThere, trBack, flStandOff, pCorner, pOut );
+}
+
+//-----------------------------------------------------------------------------
+// Something thin has a face either side of the line and no corner between
+// them: the line goes in by one side and out by the other. The way round is
+// along those faces to where the thing ends, over that end, and back: two
+// places to go by, one off each face. Which end is the question. A rope comes
+// to lie on things from above, so over the top if the top is within a link's
+// length; a post that goes on up is gone round by whichever side is shorter;
+// underneath only if nothing else is clear. Every stretch of the way found is
+// checked, so a wrong guess about the thing's shape gives no way, not a way
+// through it.
+//-----------------------------------------------------------------------------
+static bool RopeThinBetween( const Vector &vecFrom, const Vector &vecTo, const trace_t &trThere, const trace_t &trBack, float flStandOff, unsigned int nMask, ITraceFilter *pFilter, Vector *pCorners )
+{
+	const Vector &vecFace1 = trThere.plane.normal;
+	const Vector &vecFace2 = trBack.plane.normal;
+	if ( DotProduct( vecFace1, vecFace2 ) > -ROPE_CORNER_MAX_DOT )
+		return false;
+
+	// Up along the faces, and across them
+	Vector vecUp = Vector( 0, 0, 1 ) - vecFace1 * vecFace1.z;
+	if ( VectorNormalize( vecUp ) < 0.1f )
+	{
+		// (the faces lie flat: a thin floor. Any way along it is as good.)
+		vecUp = Vector( 1, 0, 0 ) - vecFace1 * vecFace1.x;
+		VectorNormalize( vecUp );
+	}
+	Vector vecAcross = CrossProduct( vecFace1, vecUp );
+
+	Vector vecMiddle = ( trThere.endpos + trBack.endpos ) * 0.5f;
+	float flReach = vecFrom.DistTo( vecTo );
+
+	const Vector vecWays[4] = { vecUp, vecAcross, -vecAcross, -vecUp };
+	bool bFound = false;
+	float flBest = FLT_MAX;
+
+	for ( int i = 0; i < 4; i++ )
+	{
+		// (over the top, if that is a way, whatever the others are; and under
+		// only if none of them was)
+		if ( bFound && i != 2 )
+			break;
+
+		// Where the thing ends that way: looked for from outside it, back in
+		trace_t tr;
+		UTIL_TraceLine( vecMiddle + vecWays[i] * flReach, vecMiddle, nMask, pFilter, &tr );
+		if ( tr.startsolid || tr.fraction == 1.0f )
+			continue;
+
+		// (the line can cross it at a slant: each side from where it is hit)
+		Vector vecEnds = tr.endpos + vecWays[i] * flStandOff;
+		Vector vecNear = trThere.endpos + vecWays[i] * DotProduct( vecEnds - trThere.endpos, vecWays[i] ) + vecFace1 * flStandOff;
+		Vector vecFar = trBack.endpos + vecWays[i] * DotProduct( vecEnds - trBack.endpos, vecWays[i] ) + vecFace2 * flStandOff;
+
+		float flWay = vecFrom.DistTo( vecNear ) + vecNear.DistTo( vecFar ) + vecFar.DistTo( vecTo );
+		if ( flWay >= flBest )
+			continue;
+
+		if ( !RopeLinkClear( vecFrom, vecNear, nMask, pFilter ) || !RopeLinkClear( vecNear, vecFar, nMask, pFilter ) || !RopeLinkClear( vecFar, vecTo, nMask, pFilter ) )
+			continue;
+
+		pCorners[0] = vecNear;
+		pCorners[1] = vecFar;
+		flBest = flWay;
+		bFound = true;
+	}
+
+	return bFound;
+}
+
+int OF2_RopeLinkAround( const Vector &vecFrom, const Vector &vecTo, float flStandOff, unsigned int nMask, ITraceFilter *pFilter, Vector *pCorners )
+{
+	trace_t trThere, trBack;
+	if ( !RopeLinkHits( vecFrom, vecTo, nMask, pFilter, &trThere, &trBack ) )
+		return 0;
+
+	if ( RopeCornerBetween( vecFrom, vecTo, trThere, trBack, flStandOff, &pCorners[0], NULL ) )
+	{
+		pCorners[1] = pCorners[0];
+		return 1;
+	}
+
+	if ( of2_rope_thin.GetBool() && RopeThinBetween( vecFrom, vecTo, trThere, trBack, flStandOff, nMask, pFilter, pCorners ) )
+		return 2;
+
+	return 0;
 }
 
 COF2RopeSim::COF2RopeSim()

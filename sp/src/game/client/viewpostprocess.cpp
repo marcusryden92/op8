@@ -1352,35 +1352,44 @@ CEnginePostMaterialProxy::~CEnginePostMaterialProxy()
 	// Do nothing
 }
 
+// OF2: FindVar hands back the material system's shared stand-in for a variable the material
+// does not have, never NULL, so OnBind wrote every value the shader lacks into that one
+// variable, and whatever next asked any material for a variable it lacks read them back
+// (the water's $underwateroverlay became "[ 0 0 0 0 ]": the screen in the missing texture).
+static IMaterialVar *OF2_FindParam( IMaterial *pMaterial, const char *pszName )
+{
+	bool bFound = false;
+	IMaterialVar *pVar = pMaterial->FindVar( pszName, &bFound, false );
+	return bFound ? pVar : NULL;
+}
+
 bool CEnginePostMaterialProxy::Init( IMaterial *pMaterial, KeyValues *pKeyValues )
 {
-	bool bFoundVar = false;
-	
-	m_pMaterialParam_AAValues = pMaterial->FindVar( "$AAInternal1", &bFoundVar, false );
-	m_pMaterialParam_AAValues2 = pMaterial->FindVar( "$AAInternal3", &bFoundVar, false );
-	m_pMaterialParam_BloomUVTransform = pMaterial->FindVar( "$AAInternal2", &bFoundVar, false );
-	m_pMaterialParam_BloomEnable = pMaterial->FindVar( "$bloomEnable", &bFoundVar, false );
-	m_pMaterialParam_BloomAmount = pMaterial->FindVar( "$bloomAmount", &bFoundVar, false );
-	m_pMaterialParam_ColCorrectEnable = pMaterial->FindVar( "$colCorrectEnable", &bFoundVar, false );
-	m_pMaterialParam_ColCorrectNumLookups = pMaterial->FindVar( "$colCorrect_NumLookups", &bFoundVar, false );
-	m_pMaterialParam_ColCorrectDefaultWeight = pMaterial->FindVar( "$colCorrect_DefaultWeight", &bFoundVar, false );
-	m_pMaterialParam_ColCorrectLookupWeights = pMaterial->FindVar( "$colCorrect_LookupWeights", &bFoundVar, false );
-	m_pMaterialParam_LocalContrastStrength = pMaterial->FindVar( "$localContrastScale", &bFoundVar, false );
-	m_pMaterialParam_LocalContrastEdgeStrength = pMaterial->FindVar( "$localContrastEdgeScale", &bFoundVar, false );
-	m_pMaterialParam_VignetteStart = pMaterial->FindVar( "$localContrastVignetteStart", &bFoundVar, false );
-	m_pMaterialParam_VignetteEnd = pMaterial->FindVar( "$localContrastVignetteEnd", &bFoundVar, false );
-	m_pMaterialParam_VignetteBlurEnable = pMaterial->FindVar( "$blurredVignetteEnable", &bFoundVar, false );
-	m_pMaterialParam_VignetteBlurStrength = pMaterial->FindVar( "$blurredVignetteScale", &bFoundVar, false );
-	m_pMaterialParam_FadeToBlackStrength = pMaterial->FindVar( "$fadeToBlackScale", &bFoundVar, false );
-	m_pMaterialParam_DepthBlurFocalDistance = pMaterial->FindVar( "$depthBlurFocalDistance", &bFoundVar, false );
-	m_pMaterialParam_DepthBlurStrength = pMaterial->FindVar( "$depthBlurStrength", &bFoundVar, false );
-	m_pMaterialParam_ScreenBlurStrength = pMaterial->FindVar( "$screenBlurStrength", &bFoundVar, false );
-	m_pMaterialParam_FilmGrainStrength = pMaterial->FindVar( "$noiseScale", &bFoundVar, false );
-	m_pMaterialParam_VomitEnable = pMaterial->FindVar( "$vomitEnable", &bFoundVar, false );
-	m_pMaterialParam_VomitColor1 = pMaterial->FindVar( "$vomitColor1", &bFoundVar, false );
-	m_pMaterialParam_VomitColor2 = pMaterial->FindVar( "$vomitColor2", &bFoundVar, false );
-	m_pMaterialParam_FadeColor = pMaterial->FindVar( "$fadeColor", &bFoundVar, false );
-	m_pMaterialParam_FadeType = pMaterial->FindVar( "$fade", &bFoundVar, false );
+	m_pMaterialParam_AAValues = OF2_FindParam( pMaterial, "$AAInternal1" );
+	m_pMaterialParam_AAValues2 = OF2_FindParam( pMaterial, "$AAInternal3" );
+	m_pMaterialParam_BloomUVTransform = OF2_FindParam( pMaterial, "$AAInternal2" );
+	m_pMaterialParam_BloomEnable = OF2_FindParam( pMaterial, "$bloomEnable" );
+	m_pMaterialParam_BloomAmount = OF2_FindParam( pMaterial, "$bloomAmount" );
+	m_pMaterialParam_ColCorrectEnable = OF2_FindParam( pMaterial, "$colCorrectEnable" );
+	m_pMaterialParam_ColCorrectNumLookups = OF2_FindParam( pMaterial, "$colCorrect_NumLookups" );
+	m_pMaterialParam_ColCorrectDefaultWeight = OF2_FindParam( pMaterial, "$colCorrect_DefaultWeight" );
+	m_pMaterialParam_ColCorrectLookupWeights = OF2_FindParam( pMaterial, "$colCorrect_LookupWeights" );
+	m_pMaterialParam_LocalContrastStrength = OF2_FindParam( pMaterial, "$localContrastScale" );
+	m_pMaterialParam_LocalContrastEdgeStrength = OF2_FindParam( pMaterial, "$localContrastEdgeScale" );
+	m_pMaterialParam_VignetteStart = OF2_FindParam( pMaterial, "$localContrastVignetteStart" );
+	m_pMaterialParam_VignetteEnd = OF2_FindParam( pMaterial, "$localContrastVignetteEnd" );
+	m_pMaterialParam_VignetteBlurEnable = OF2_FindParam( pMaterial, "$blurredVignetteEnable" );
+	m_pMaterialParam_VignetteBlurStrength = OF2_FindParam( pMaterial, "$blurredVignetteScale" );
+	m_pMaterialParam_FadeToBlackStrength = OF2_FindParam( pMaterial, "$fadeToBlackScale" );
+	m_pMaterialParam_DepthBlurFocalDistance = OF2_FindParam( pMaterial, "$depthBlurFocalDistance" );
+	m_pMaterialParam_DepthBlurStrength = OF2_FindParam( pMaterial, "$depthBlurStrength" );
+	m_pMaterialParam_ScreenBlurStrength = OF2_FindParam( pMaterial, "$screenBlurStrength" );
+	m_pMaterialParam_FilmGrainStrength = OF2_FindParam( pMaterial, "$noiseScale" );
+	m_pMaterialParam_VomitEnable = OF2_FindParam( pMaterial, "$vomitEnable" );
+	m_pMaterialParam_VomitColor1 = OF2_FindParam( pMaterial, "$vomitColor1" );
+	m_pMaterialParam_VomitColor2 = OF2_FindParam( pMaterial, "$vomitColor2" );
+	m_pMaterialParam_FadeColor = OF2_FindParam( pMaterial, "$fadeColor" );
+	m_pMaterialParam_FadeType = OF2_FindParam( pMaterial, "$fade" );
 
 	return true;
 }

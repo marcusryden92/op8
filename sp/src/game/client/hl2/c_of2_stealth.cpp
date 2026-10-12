@@ -158,7 +158,7 @@ void COF2StealthLight::Update( float frametime )
 //-----------------------------------------------------------------------------
 static ConVar of2_lightcone_edge( "of2_lightcone_edge", "1.5", FCVAR_NONE, "Flashlight cone in the air: how soft its outline is. Higher gathers the light towards the middle of the cone." );
 static ConVar of2_lightcone_falloff( "of2_lightcone_falloff", "2", FCVAR_NONE, "Flashlight cone in the air: how quickly it thins out along its length. 1 is evenly, higher keeps the light near the head." );
-static ConVar of2_lightcone_lens( "of2_lightcone_lens", "4", FCVAR_NONE, "Flashlight cone in the air: how wide it is where it starts, from its middle to its edge, in units." );
+static ConVar of2_lightcone_lens( "of2_lightcone_lens", "0.75", FCVAR_NONE, "Flashlight cone in the air: how wide it is where it starts, from its middle to its edge, in units. Small: it starts at a point, the size of the lamp (at 4 it began as a flat disc much wider than the lamp)." );
 static ConVar of2_lightcone_clip( "of2_lightcone_clip", "1", FCVAR_NONE, "Flashlight cone in the air: cut it off at the walls, floor and ceiling it lands on, so that it is not seen from behind them." );
 static ConVar of2_lightcone_shadows( "of2_lightcone_shadows", "1", FCVAR_NONE, "Flashlight cone in the air: where the flashlight is a projected light with shadows, the cone reads its shadow map: it stops at whatever the light lands on, and things cast shadows through it. 0: the cut-off planes of of2_lightcone_clip only." );
 
@@ -188,7 +188,18 @@ public:
 		m_flConeLength = 320.0f;
 		m_flConeBrightness = 0.0f;
 		m_flConePool = 0.0f;
+		s_Cones.AddToTail( this );
 	}
+
+	~C_OF2LightCone()
+	{
+		s_Cones.FindAndRemove( this );
+	}
+
+	// How much of this lamp's light falls on a place: 0 to about 1
+	float	LightAt( const Vector &vecPos );
+
+	static CUtlVector<C_OF2LightCone *> s_Cones;
 
 	virtual void	OnDataChanged( DataUpdateType_t updateType );
 	virtual void	ClientThink( void );
@@ -212,6 +223,57 @@ private:
 	CMaterialReference	m_Material;
 	CMaterialReference	m_MaterialInside;
 };
+
+CUtlVector<C_OF2LightCone *> C_OF2LightCone::s_Cones;
+
+//-----------------------------------------------------------------------------
+// Purpose: What the code draws and lights itself (the Barnacle's tongue, the
+//			climb ropes) knows nothing of a projected light, so a flashlight's
+//			beam did not show on it. This is the beam as the server has it: the
+//			same angle and reach, fading towards its edge and its end, and
+//			stopped by the world.
+//-----------------------------------------------------------------------------
+#define LIGHTCONE_REACH	600.0f	// the server's of2_police_flashlight_range, which is not sent
+
+float C_OF2LightCone::LightAt( const Vector &vecPos )
+{
+	if ( IsDormant() )
+		return 0.0f;
+
+	Vector vecOrigin = GetAbsOrigin();
+	Vector vecTo = vecPos - vecOrigin;
+	float flDist = VectorNormalize( vecTo );
+	if ( flDist > LIGHTCONE_REACH || flDist < 1.0f )
+		return 0.0f;
+
+	Vector vecForward;
+	AngleVectors( GetAbsAngles(), &vecForward );
+
+	float flCos = cos( DEG2RAD( clamp( m_flConeFOV, 1.0f, 170.0f ) * 0.5f ) );
+	float flDot = DotProduct( vecTo, vecForward );
+	if ( flDot <= flCos )
+		return 0.0f;
+
+	CTraceFilterWorldOnly filter;
+	trace_t tr;
+	UTIL_TraceLine( vecOrigin, vecPos, MASK_OPAQUE, &filter, &tr );
+	if ( tr.fraction < 0.98f )
+		return 0.0f;
+
+	float flEdge = clamp( ( flDot - flCos ) / ( ( 1.0f - flCos ) * 0.5f ), 0.0f, 1.0f );
+	float flReach = 1.0f - flDist / LIGHTCONE_REACH;
+	return flEdge * flReach * flReach * 2.0f;
+}
+
+float OF2_FlashlightLightAt( const Vector &vecPos )
+{
+	float flLight = 0.0f;
+	for ( int i = 0; i < C_OF2LightCone::s_Cones.Count(); i++ )
+	{
+		flLight += C_OF2LightCone::s_Cones[i]->LightAt( vecPos );
+	}
+	return MIN( flLight, 2.0f );
+}
 
 IMPLEMENT_CLIENTCLASS_DT( C_OF2LightCone, DT_OF2LightCone, COF2LightCone )
 	RecvPropFloat( RECVINFO( m_flConeFOV ) ),

@@ -220,6 +220,7 @@ private:
 	bool	AlreadyHeard( CSound *pSound );
 	void	AlertSquad( void );
 	void	LookForBodies( void );
+	void	LookForTongue( void );
 	void	SearchLook( void );
 
 	COF2Flashlight	*m_pLight;
@@ -254,6 +255,10 @@ private:
 	bool	m_bSearchCrouch;		// ...from a crouch (a sweep spot marked so: a tunnel, under something)
 	float	m_flStandTime;			// crouched for that until then; 0: not. Not saved.
 	int		m_iCrouchWant;
+	float	m_flNextTongueLook;		// not saved
+	float	m_flTongueSeen;			// how long it has had the Barnacle's tongue in view
+	int		m_nSearchSerial;		// the move of its search group it last set off on. Not saved.
+	int		m_iInvestigateSlot;		// which of those going to the place itself it is
 
 	Vector	m_vecStimulus;
 	int		m_iStimulus;
@@ -351,6 +356,9 @@ public:
 	// Is this place lit for the one wearing it: by the room it stands in (as far as it
 	// knows), or by the beam?
 	bool	Lights( const Vector &vecPos );
+
+	// Is this place in the beam itself: the light is on, and it is inside its angle and reach?
+	bool	InBeam( const Vector &vecPos );
 
 private:
 	void	Set( bool bOn );

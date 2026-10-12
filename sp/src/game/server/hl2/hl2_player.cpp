@@ -1183,7 +1183,13 @@ void CHL2_Player::PreThink(void)
 				}
 			}
 		} while ( pBarnacle );
-		
+
+		// OF2: an ichthyosaur holds the player the same way, as its child
+		if ( GetMoveParent() && FClassnameIs( GetMoveParent(), "npc_ichthyosaur" ) )
+		{
+			bOnBarnacle = true;
+		}
+
 		if ( !bOnBarnacle )
 		{
 			Warning( "Attached to barnacle?\n" );

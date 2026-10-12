@@ -18,9 +18,25 @@
 #include "beamdraw.h"
 #include "view.h"
 #include "of2_curve.h"
+#include "of2_nightvision.h"
 
 // memdbgon must be the last include file in a .cpp file!!!
 #include "tier0/memdbgon.h"
+
+static ConVar of2_tongue_min_light_nv( "of2_tongue_min_light_nv", "0.3", FCVAR_NONE, "With night vision on, the Barnacle's tongue and the climb ropes never get darker than this (the goggles' own light is not in the lighting they are shaded by)." );
+
+// The curve through the points swings out past the straight lines between them
+// wherever they turn, and the points lie only half the thing's thickness off
+// what they rest on: where a tongue lying on a floor turned upwards, the curve
+// dipped under the floor first.
+static ConVar of2_curve_collide( "of2_curve_collide", "1", FCVAR_NONE, "The Barnacle's tongue and the climb ropes are drawn as a curve through their points. Where that curve leaves the straight line between two points and goes into the map, it is kept out of it. 0: it is drawn as it comes, through floors and corners in places (as before)." );
+
+// A piece of the curve this close to the straight line is not looked at
+#define CURVE_COLLIDE_MIN	0.25f
+
+// c_of2_stealth.cpp: the light of the head flashlights at a place, which the
+// engine's lighting does not have either (they are projected textures)
+extern float OF2_FlashlightLightAt( const Vector &vecPos );
 
 #define CURVE_MAX_SMOOTH	16
 // A texture stretched once over the whole length stops this short of its ends
@@ -525,15 +541,27 @@ void OF2_DrawCurve( const Vector *pPoints, const bool *pBend, int nPoints, const
 	Vector vecPointColor[OF2_CURVE_MAX_POINTS];
 	float flPointBox[OF2_CURVE_MAX_POINTS][6];
 	float flMinLight = clamp( style.flMinLight, 0.0f, 1.0f );
+	flMinLight = Lerp( OF2_NightVisionAmount(), flMinLight, MAX( flMinLight, clamp( of2_tongue_min_light_nv.GetFloat(), 0.0f, 1.0f ) ) );
 	for ( int i = 0; i < nPoints; i++ )
 	{
 		Vector vecLight;
 		Vector vecBox[6];
 		engine->ComputeLighting( pPoints[i], NULL, true, vecLight, vecBox );
 
+		// In a head flashlight's beam (every third point looks, the others take it over)
+		static float s_flBeam = 0.0f;
+		if ( ( i % 3 ) == 0 )
+		{
+			s_flBeam = OF2_FlashlightLightAt( pPoints[i] );
+		}
+		vecLight += Vector( 1.0f, 0.96f, 0.85f ) * s_flBeam;
+
 		for ( int j = 0; j < 3; j++ )
 		{
-			vecPointColor[i][j] = clamp( LinearToGamma( vecLight[j] ), flMinLight, 1.0f ) * style.vecTint[j];
+			// (Never over 1 into LinearToGamma: it asserts on that, and the mathlib this
+			// links is a debug build, where an assert stops the game. A beam on top of the
+			// room's light went over, and the game went down the moment the tongue crossed one.)
+			vecPointColor[i][j] = clamp( LinearToGamma( clamp( vecLight[j], 0.0f, 1.0f ) ), flMinLight, 1.0f ) * style.vecTint[j];
 		}
 
 		for ( int j = 0; j < 6; j++ )
@@ -554,6 +582,10 @@ void OF2_DrawCurve( const Vector *pPoints, const bool *pBend, int nPoints, const
 
 	int nSmooth = clamp( style.nSmooth, 1, CURVE_MAX_SMOOTH );
 	int nCount = 0;
+
+	bool bCollide = style.bTube && of2_curve_collide.GetBool();
+	float flClear = style.flWidth * 0.5f;
+	CTraceFilterWorldAndPropsOnly mapFilter;
 
 	for ( int i = 0; i < nPoints - 1; i++ )
 	{
@@ -580,6 +612,22 @@ void OF2_DrawCurve( const Vector *pPoints, const bool *pBend, int nPoints, const
 			else
 			{
 				Catmull_Rom_Spline_Normalize( vecBefore, pPoints[i], pPoints[i + 1], vecAfter, t, vecPos[nCount] );
+
+				// The straight line between the two points is clear. From there out
+				// to the curve, and half the thing's thickness on: no further than
+				// that leaves it room.
+				Vector vecLine = pPoints[i] + ( pPoints[i + 1] - pPoints[i] ) * t;
+				Vector vecOut = vecPos[nCount] - vecLine;
+				float flOut = bCollide ? VectorNormalize( vecOut ) : 0.0f;
+				if ( flOut > CURVE_COLLIDE_MIN )
+				{
+					trace_t tr;
+					UTIL_TraceLine( vecLine, vecPos[nCount] + vecOut * flClear, MASK_SOLID_BRUSHONLY, &mapFilter, &tr );
+					if ( !tr.startsolid && tr.fraction < 1.0f )
+					{
+						vecPos[nCount] = vecLine + vecOut * MAX( tr.fraction * ( flOut + flClear ) - flClear, 0.0f );
+					}
+				}
 			}
 
 			vecColor[nCount] = vecPointColor[i] + ( vecPointColor[i + 1] - vecPointColor[i] ) * t;

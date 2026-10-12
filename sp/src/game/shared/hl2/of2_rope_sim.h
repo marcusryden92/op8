@@ -29,6 +29,13 @@ class ITraceFilter;
 // corner that is in the way (a thin plate, two separate things).
 bool OF2_RopeLinkCorner( const Vector &vecFrom, const Vector &vecTo, float flStandOff, unsigned int nMask, ITraceFilter *pFilter, Vector *pCorner, Vector *pOut = NULL );
 
+// The same, and also the way round something thin that the line goes in by one
+// side of and out by the other (a beam, a railing, a plate: of2_rope_thin),
+// which is two places, one off each of its sides. Returns how many places the
+// line goes by on its way from vecFrom to vecTo, 0 to 2, in that order in
+// pCorners (room for two; with one, both are it).
+int OF2_RopeLinkAround( const Vector &vecFrom, const Vector &vecTo, float flStandOff, unsigned int nMask, ITraceFilter *pFilter, Vector *pCorners );
+
 class COF2RopeSim
 {
 public:
