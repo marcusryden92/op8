@@ -315,6 +315,29 @@ public:
 	virtual CBaseEntity	*GetHeldObject( void );
 
 	virtual bool		IsFollowingPhysics( void ) { return (m_afPhysicsFlags & PFLAG_ONBARNACLE) > 0; }
+
+	// OF2: the held state the barnacle's grab interaction sets, for the ichthyosaur. The interaction itself has
+	// no number until the first npc_barnacle is made, and is refused before that.
+	void				OF2_SetHeldByNPC( bool bHeld )
+	{
+		if ( bHeld )
+		{
+			m_afPhysicsFlags |= PFLAG_ONBARNACLE;
+			ClearUseEntity();
+
+			// Off whatever they hung from (it jumps at a player on a rope or the Barnacle's tongue); the
+			// tether's owner sees that on its next think and lets go as well
+			if ( IsOnTether() )
+			{
+				StopTether();
+			}
+		}
+		else
+		{
+			m_afPhysicsFlags &= ~PFLAG_ONBARNACLE;
+			SetMoveType( MOVETYPE_WALK );
+		}
+	}
 	void				InputForceDropPhysObjects( inputdata_t &data );
 
 	virtual void		Event_Killed( const CTakeDamageInfo &info );

@@ -460,7 +460,7 @@ public:
 			{
 				if (baseNPC->CapabilitiesGet() & bits_CAP_MOVE_FLY)
 				{
-					Vector pos = tr.endpos - forward * 36;
+					Vector pos = tr.endpos - forward * MAX( 36.0f, baseNPC->GetHullMaxs().Length() + 4.0f );	// OF2: back by the size of its box (the ichthyosaur's 80 unit cube 36 off a wall is in the wall, and it was removed without a word)
 					baseNPC->Teleport( &pos, bCreateAimed ? &angles : NULL, NULL );
 				}
 				else
@@ -599,7 +599,7 @@ void CC_NPC_Create( const CCommand &args )
 		{
 			if (baseNPC->CapabilitiesGet() & bits_CAP_MOVE_FLY)
 			{
-				Vector pos = tr.endpos - forward * 36;
+				Vector pos = tr.endpos - forward * MAX( 36.0f, baseNPC->GetHullMaxs().Length() + 4.0f );	// OF2: back by the size of its box (the ichthyosaur's 80 unit cube 36 off a wall is in the wall, and it was removed without a word)
 				baseNPC->Teleport( &pos, NULL, NULL );
 			}
 			else
@@ -666,7 +666,7 @@ void CC_NPC_Create_Aimed( const CCommand &args )
 		{
 			if (baseNPC->CapabilitiesGet() & bits_CAP_MOVE_FLY)
 			{
-				Vector pos = tr.endpos - forward * 36;
+				Vector pos = tr.endpos - forward * MAX( 36.0f, baseNPC->GetHullMaxs().Length() + 4.0f );	// OF2: back by the size of its box (the ichthyosaur's 80 unit cube 36 off a wall is in the wall, and it was removed without a word)
 				baseNPC->Teleport( &pos, &angles, NULL );
 			}
 			else

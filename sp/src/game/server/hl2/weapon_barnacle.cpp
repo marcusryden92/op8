@@ -102,6 +102,10 @@
 // the tongue let go of isn't picked up again for this long
 #define BARNACLE_RESTICK_TIME		0.75f
 #define BARNACLE_RECATCH_TIME		2.0f
+
+// The texture level designers put on surfaces the tongue must not stick to.
+// Part of the name, so a copy the compiler patches for a map still counts.
+#define BARNACLE_BLOCK_TEXTURE		"dev/dev_nobarnacle"
 #define BARNACLE_MAX_DROPPED		4
 
 // How often a tongue pulled tight on someone it can't kill outright hurts them
@@ -142,6 +146,10 @@
 // this many times of2_barnacle_snag_dist and of2_barnacle_snag_time
 #define BARNACLE_TIP_SNAG_DIST		1.5f
 #define BARNACLE_TIP_SNAG_TIME		2.0f
+// What the tongue floats on
+#define BARNACLE_WATER_CONTENTS		( CONTENTS_WATER | CONTENTS_SLIME )
+// A point of the tongue this far under the surface or more is just "deep"
+#define BARNACLE_FLOAT_PROBE		16.0f
 
 ConVar of2_barnacle_max_length( "of2_barnacle_max_length", "1500", FCVAR_NONE, "Length of the Barnacle's whole tongue. Read when thrown." );
 ConVar of2_barnacle_throw_speed( "of2_barnacle_throw_speed", "1100", FCVAR_NONE, "Speed the Barnacle's tip is thrown at." );
@@ -172,17 +180,18 @@ ConVar of2_barnacle_spacing( "of2_barnacle_spacing", "20", FCVAR_NONE, "The Barn
 ConVar of2_barnacle_corners( "of2_barnacle_corners", "1", FCVAR_NONE, "Where the straight line between two points of the Barnacle's tongue goes through a corner (one on a floor, the next over its edge), the two are held to each other by the way round the corner. 0: straight through it, as before. (The drawing has its own switch, of2_rope_corners.)" );
 ConVar of2_barnacle_drape( "of2_barnacle_drape", "1", FCVAR_NONE, "The length of the Barnacle's tongue lies on and drapes over loose physics objects, as it does over the world. 0: only over the world." );
 ConVar of2_barnacle_slide_speed( "of2_barnacle_slide_speed", "120", FCVAR_NONE, "Where the Barnacle's tongue goes over an edge it slides along the edge, towards where it pulls on it evenly. This is its speed at the hardest pull. 0: it stays where it first touched." );
-ConVar of2_barnacle_slide_friction( "of2_barnacle_slide_friction", "0.35", FCVAR_NONE, "How sticky the Barnacle's tongue is on an edge: how lopsided the pull has to be before it slides along it (0 always, 1 only when dragged almost straight along it). A climb rope has its own, lower." );
+ConVar of2_barnacle_slide_friction( "of2_barnacle_slide_friction", "0.35", FCVAR_NONE, "How sticky the Barnacle's tongue is on an edge: how lopsided the pull has to be before it slides along it (0 always, 1 only when dragged almost straight along it). This is for a tongue turning a right angle over the edge: it holds less the less the tongue bends there. A climb rope has its own, lower." );
 ConVar of2_barnacle_prey( "of2_barnacle_prey", "1", FCVAR_NONE, "The Barnacle's tongue takes hold of living things: headcrabs (reeled in and eaten), the headcrab on a zombie, and hostile people. 0: it passes through them all." );
 ConVar of2_barnacle_eat_health( "of2_barnacle_eat_health", "10", FCVAR_NONE, "Health the player gets when the Barnacle eats a headcrab." );
 ConVar of2_barnacle_flick_time( "of2_barnacle_flick_time", "1.37", FCVAR_NONE, "How long the whip of the Barnacle in the hand takes when it snaps a neck, start to finish. The neck goes a little over two fifths of the way through, with the mouth at the top." );
 ConVar of2_barnacle_alert_delay( "of2_barnacle_alert_delay", "1", FCVAR_NONE, "How long after the Barnacle's tongue lands on someone they take to notice, in seconds: the time there is to break their neck unnoticed." );
 ConVar of2_barnacle_snap_noise( "of2_barnacle_snap_noise", "350", FCVAR_NONE, "How far a neck broken by the Barnacle is heard by NPCs, in units. Whoever hears it looks that way, and is then quick to make out the tongue." );
-ConVar of2_barnacle_yank( "of2_barnacle_yank", "100", FCVAR_NONE, "Someone who knows the player is there and has the Barnacle's tongue land on them (or notices while it holds them) takes hold of it and yanks: the player is pulled about this far towards them and the tongue lets go. 0: they do not." );
+ConVar of2_barnacle_yank( "of2_barnacle_yank", "400", FCVAR_NONE, "Someone who knows the player is there and has the Barnacle's tongue land on them (or notices while it holds them) takes hold of it and yanks: the player is pulled about this far towards them and the tongue lets go. 0: they do not." );
 ConVar of2_barnacle_yank_delay( "of2_barnacle_yank_delay", "0.35", FCVAR_NONE, "How long they take to do that, in seconds." );
 ConVar of2_barnacle_strain_damage( "of2_barnacle_strain_damage", "30", FCVAR_NONE, "Damage a second the Barnacle's tongue does, pulled tight, to someone it can't kill outright: an elite soldier, or anyone it has by something other than the head or chest." );
 ConVar of2_barnacle_corpses( "of2_barnacle_corpses", "1", FCVAR_NONE, "While the player has the Barnacle, what dies leaves a body the tongue can take hold of (a ragdoll on the server, as the gravity gun's charged form makes them). 0: bodies are as in Half-Life 2, only there for the eye." );
 ConVar of2_barnacle_corpse_speed( "of2_barnacle_corpse_speed", "0.5", FCVAR_NONE, "With a body on its tongue the Barnacle reels and pulls at this share of its usual speed." );
+ConVar of2_barnacle_corpse_heavy( "of2_barnacle_corpse_heavy", "120", FCVAR_NONE, "A body heavier than this comes in slower than of2_barnacle_corpse_speed in proportion to its weight: one twice as heavy at half that speed (a dead ichthyosaur weighs 240, a person under 100). Lower: heavy bodies drag more. 0: weight makes no difference." );
 ConVar of2_barnacle_corpse_mass( "of2_barnacle_corpse_mass", "250", FCVAR_NONE, "Heaviest body the Barnacle pulls in. A body is pulled whatever of2_barnacle_anchor_mass says, up to this; a heavier one holds the player." );
 ConVar of2_barnacle_corpse_heft( "of2_barnacle_corpse_heft", "4", FCVAR_NONE, "The Barnacle's tongue has a body by one of its parts, which weighs a few kilos, and pulled that part only as hard as it takes to move a few kilos: too little to bring the rest of the body up over an edge. The part is pulled as if it weighed this many times more. 1 is as it was; too high and the body is flung about." );
 ConVar of2_barnacle_bite_damage( "of2_barnacle_bite_damage", "40", FCVAR_NONE, "Damage a second the Barnacle does to an enemy too big for its tongue to kill (an antlion guard), once the player has reeled themselves up to it and goes on reeling." );
@@ -191,6 +200,10 @@ ConVar of2_barnacle_auto_release( "of2_barnacle_auto_release", "1", FCVAR_NONE, 
 ConVar of2_barnacle_edge_haul( "of2_barnacle_edge_haul", "64", FCVAR_NONE, "Something on the Barnacle's tip that is pulled up to an edge the tongue goes over is, from this close to the edge, pulled towards a spot out past it instead, so it comes over the edge and is not jammed under it. 0 turns it off." );
 ConVar of2_barnacle_edge_clear( "of2_barnacle_edge_clear", "24", FCVAR_NONE, "How far out from an edge, and on past it, that spot is when what is pulled has reached the edge." );
 ConVar of2_barnacle_catch( "of2_barnacle_catch", "1", FCVAR_NONE, "A loose tongue (nothing on its tip) that lies over this many edges or more holds the player's weight there when they come off the ground: it sticks to the edge nearest its tip, and what is past that hangs on. 0: only a tip that has stuck holds them." );
+ConVar of2_barnacle_float( "of2_barnacle_float", "2", FCVAR_NONE, "The Barnacle's tongue floats: under water it is pushed up by at most this many times its own weight (over 1 it rises). 0: it sinks, as before." );
+ConVar of2_barnacle_float_depth( "of2_barnacle_float_depth", "0.5", FCVAR_NONE, "How far under the surface the middle of a floating tongue comes to rest. It is 2 thick: at 1 it is just under, at 0.1 half out of the water." );
+ConVar of2_barnacle_float_tip( "of2_barnacle_float_tip", "1", FCVAR_NONE, "The tip of the Barnacle's tongue floats as the rest does. 0: it sinks and sticks to the bottom, with the tongue rising from it." );
+ConVar of2_barnacle_water_drag( "of2_barnacle_water_drag", "6", FCVAR_NONE, "How much water slows the Barnacle's tongue, tip included, on top of of2_barnacle_rope_drag. Lower, a throw goes deeper before it comes up and the tongue bobs longer." );
 ConVar of2_barnacle_debug( "of2_barnacle_debug", "0", FCVAR_NONE, "Draw the Barnacle's tongue as debug overlays: its line and bends, its points, and what it holds." );
 
 static const char *s_pTongueContext = "BarnacleTongueThink";
@@ -728,6 +741,41 @@ void CBarnacleRope::GetNodeForces( CSimplePhysics::CNode *pNodes, int iNode, Vec
 		Vector vecVelocity = ( pNodes[iNode].m_vPos - pNodes[iNode].m_vPrevPos ) / TICK_INTERVAL;
 		*pAccel -= vecVelocity * ( 2.0f * flDrag );
 	}
+
+	// It floats (the user asked). A point under water is pushed up, more the
+	// deeper it is: by its own weight at of2_barnacle_float_depth under the
+	// surface, which is where it comes to rest, and by of2_barnacle_float times
+	// that at the most. Pushed by a fixed amount whenever it is under, it would
+	// hop in and out of the surface every tick. The water also slows it, the
+	// tip too. Not during the throw, which is free flight for every point of it
+	// (a throw from under water has to get somewhere; one into water ends there).
+	float flFloat = of2_barnacle_float.GetFloat();
+	if ( flFloat <= 0.0f || m_bFeeding || ( iNode == m_nCount - 1 && !of2_barnacle_float_tip.GetBool() ) )
+		return;
+
+	const Vector &vecPos = pNodes[iNode].m_vPos;
+	if ( !( UTIL_PointContents( vecPos ) & BARNACLE_WATER_CONTENTS ) )
+		return;
+
+	// How far under: down to it from above the surface
+	float flDepth = BARNACLE_FLOAT_PROBE;
+	CTraceFilterWorldOnly waterFilter;
+	trace_t tr;
+	UTIL_TraceLine( vecPos + Vector( 0.0f, 0.0f, BARNACLE_FLOAT_PROBE ), vecPos, BARNACLE_WATER_CONTENTS, &waterFilter, &tr );
+	if ( !tr.startsolid )
+	{
+		flDepth = tr.endpos.z - vecPos.z;
+	}
+
+	float flRest = MAX( of2_barnacle_float_depth.GetFloat(), 0.1f );
+	pAccel->z += 2.0f * GetCurrentGravity() * clamp( flDepth / flRest, 0.0f, flFloat );
+
+	float flWaterDrag = of2_barnacle_water_drag.GetFloat();
+	if ( flWaterDrag > 0.0f )
+	{
+		Vector vecVelocity = ( vecPos - pNodes[iNode].m_vPrevPos ) / TICK_INTERVAL;
+		*pAccel -= vecVelocity * ( 2.0f * flWaterDrag );
+	}
 }
 
 void CBarnacleRope::ApplyConstraints( CSimplePhysics::CNode *pNodes, int nNodes )
@@ -1228,6 +1276,8 @@ private:
 	// The velocity the tip was thrown at; the rest of the tongue is fed out at the same
 	Vector		m_vecLaunchVelocity;
 	bool		m_bWasFeeding;
+	// The tip has been out of the water since it was thrown (a throw ends where it goes in)
+	bool		m_bTipDry;
 	// What the throw left the tongue longer than it needs to be: it hangs by that until it is reeled
 	float		m_flSlack;
 	// When the throw ended
@@ -1346,6 +1396,7 @@ CWeaponBarnacle::CWeaponBarnacle()
 	m_flMaxLength = 0.0f;
 	m_bPayingOut = false;
 	m_vecLaunchVelocity.Init();
+	m_bTipDry = false;
 	m_bWasFeeding = false;
 	m_flSlack = 0.0f;
 	m_flSlackTime = 0.0f;
@@ -1671,6 +1722,7 @@ void CWeaponBarnacle::Throw( void )
 
 	m_bTongueOut = true;
 	m_bPayingOut = true;
+	m_bTipDry = false;
 	m_bRetracting = false;
 	m_bAttackReleased = false;
 	m_flLengthRate = 0.0f;
@@ -1826,6 +1878,15 @@ void CWeaponBarnacle::StickTip( CHL2_Player *pPlayer, const trace_t &tr )
 			// Nothing there it can hold: it slaps off
 			m_flTipStickTime = gpGlobals->curtime + BARNACLE_RESTICK_TIME;
 		}
+		return;
+	}
+
+	// A surface the level designer has ruled out: it slaps off that as well,
+	// and the throw is over
+	if ( tr.surface.name && Q_stristr( tr.surface.name, BARNACLE_BLOCK_TEXTURE ) )
+	{
+		m_flTipStickTime = gpGlobals->curtime + BARNACLE_RESTICK_TIME;
+		m_bPayingOut = false;
 		return;
 	}
 
@@ -2117,7 +2178,18 @@ void CWeaponBarnacle::UpdatePrey( CHL2_Player *pPlayer )
 
 			// The pull is their melee swing (a soldier's melee_gunhit; the user asked for
 			// it), started now so that it lands as the player comes
-			if ( pNPC->SelectWeightedSequence( ACT_MELEE_ATTACK1 ) != ACTIVITY_NOT_AVAILABLE )
+			// A metrocop does its "swing" (the user asked), whatever it has in its
+			// hands: played over what it is doing, since it has no melee activity
+			// without the stunstick out.
+			int iSwing = FClassnameIs( pNPC, "npc_metropolice" ) ? pNPC->LookupSequence( "swing" ) : -1;
+			if ( iSwing >= 0 )
+			{
+				int iLayer = pNPC->AddLayeredSequence( iSwing, 0 );
+				pNPC->SetLayerAutokill( iLayer, true );
+				pNPC->SetLayerBlendIn( iLayer, 0.1f );
+				pNPC->SetLayerBlendOut( iLayer, 0.2f );
+			}
+			else if ( pNPC->SelectWeightedSequence( ACT_MELEE_ATTACK1 ) != ACTIVITY_NOT_AVAILABLE )
 			{
 				pNPC->SetSchedule( SCHED_MELEE_ATTACK1 );
 			}
@@ -2482,7 +2554,8 @@ bool CWeaponBarnacle::CatchOnEdge( CHL2_Player *pPlayer )
 		return false;
 
 	// Only their weight does it: standing, the tongue is theirs to drag about
-	if ( pPlayer->GetGroundEntity() != NULL || pPlayer->IsOnTether() )
+	// (OF2: nor while an ichthyosaur has them in its mouth: off the ground and off the tether, but not falling)
+	if ( pPlayer->GetGroundEntity() != NULL || pPlayer->IsOnTether() || pPlayer->HasPhysicsFlag( PFLAG_ONBARNACLE ) )
 		return false;
 
 	Vector vecCatch = m_Tether.GetPoint( nPivots );
@@ -2779,9 +2852,29 @@ bool CWeaponBarnacle::HoldsCorpse( void ) const
 	return bCorpse;
 }
 
+// (and a heavy one slower again, by its weight: of2_barnacle_corpse_heavy)
 float CWeaponBarnacle::GetHaulScale( void ) const
 {
-	return HoldsCorpse() ? clamp( of2_barnacle_corpse_speed.GetFloat(), 0.05f, 1.0f ) : 1.0f;
+	if ( !HoldsCorpse() )
+		return 1.0f;
+
+	float flMass = ( m_iTip == TIP_PAYLOAD && IsCorpse( m_TipHold.hEntity ) ) ? m_TipHold.flMass : 0.0f;
+	for ( int i = 0; i < m_nJunk; i++ )
+	{
+		if ( IsCorpse( m_Junk[i].hEntity ) )
+		{
+			flMass = MAX( flMass, m_Junk[i].flMass );
+		}
+	}
+
+	float flScale = of2_barnacle_corpse_speed.GetFloat();
+	float flHeavy = of2_barnacle_corpse_heavy.GetFloat();
+	if ( flHeavy > 0.0f && flMass > flHeavy )
+	{
+		flScale *= flHeavy / flMass;
+	}
+
+	return clamp( flScale, 0.05f, 1.0f );
 }
 
 //-----------------------------------------------------------------------------
@@ -3254,6 +3347,25 @@ void CWeaponBarnacle::TongueThink( void )
 			m_bPayingOut = false;
 			flLength = m_flMaxLength;
 			m_Tether.SetTotalLength( m_flMaxLength );
+		}
+		else if ( !( UTIL_PointContents( m_Rope.GetTip() ) & BARNACLE_WATER_CONTENTS ) )
+		{
+			m_bTipDry = true;
+		}
+		else if ( m_bTipDry && of2_barnacle_float.GetFloat() > 0.0f && of2_barnacle_float_tip.GetBool() )
+		{
+			// (Where it goes in from the air, that is. Thrown from under water, or
+			// with the mouth dipped under for a moment, the tip starts in it, and the
+			// throw was over before any tongue was out: nothing happened, as the user
+			// found. Such a throw goes on under water as it would in the air.)
+			// A tip that floats lands on water and sticks to nothing, so the throw
+			// never ended: tongue went on coming out at the speed of the throw, its
+			// points flying free one after the other along the same arc, like a jet
+			// of water (the user: the stretch before the water is a static curve).
+			// The throw is over where the tip goes into the water.
+			bFeeding = false;
+			m_bPayingOut = false;
+			flLength = m_Tether.GetTotalLength();
 		}
 	}
 

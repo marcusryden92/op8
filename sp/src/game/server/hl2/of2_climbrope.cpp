@@ -67,7 +67,7 @@
 ConVar of2_climbrope_grab_dist( "of2_climbrope_grab_dist", "24", FCVAR_NONE, "How close the player's hand has to come to a climb rope to catch it in mid-air. Use reaches a little further." );
 ConVar of2_climbrope_regrab_time( "of2_climbrope_regrab_time", "1.0", FCVAR_NONE, "Seconds after letting go of a climb rope before touching it catches it again." );
 ConVar of2_climbrope_slide_speed( "of2_climbrope_slide_speed", "200", FCVAR_NONE, "Where a held climb rope goes over an edge it slides along the edge, towards where it pulls on it evenly. This is its speed at the hardest pull. 0: it stays where it first touched." );
-ConVar of2_climbrope_slide_friction( "of2_climbrope_slide_friction", "0.1", FCVAR_NONE, "How lopsided the pull has to be before a climb rope slides along an edge (0 always, 1 only when dragged almost straight along it)." );
+ConVar of2_climbrope_slide_friction( "of2_climbrope_slide_friction", "0.1", FCVAR_NONE, "How lopsided the pull has to be before a climb rope slides along an edge (0 always, 1 only when dragged almost straight along it). This is for a rope turning a right angle over the edge: it holds less the less the rope bends there." );
 ConVar of2_climbrope_use_dist( "of2_climbrope_use_dist", "96", FCVAR_NONE, "How far away use takes hold of a climb rope the player is looking at (one lying on the ground, say)." );
 ConVar of2_climbrope_grab_wrap( "of2_climbrope_grab_wrap", "1", FCVAR_NONE, "A climb rope taken hold of starts out bent round the edges the loose rope lay over, found by following it out from where it is tied. 0: a straight line from there to the hand, as before." );
 ConVar of2_climbrope_debug( "of2_climbrope_debug", "0", FCVAR_NONE, "Draw climb ropes' tethers, and the points of loose ones, as debug lines." );

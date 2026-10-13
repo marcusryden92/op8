@@ -666,9 +666,79 @@ void C_BaseHLPlayer::PerformClientSideNPCSpeedModifiers( float flFrameTime, CUse
 //-----------------------------------------------------------------------------
 // Purpose: Input handling
 //-----------------------------------------------------------------------------
+// OF2: in an ichthyosaur's jaws the view is kept on it (the user asked: held, you were often looking somewhere else
+// and could not tell what was going on). The player is the fish's child while it holds them, which is how this
+// knows; the view is turned towards its face until it is within the cone, and left alone inside it.
+static ConVar of2_ichthyosaur_view_cone( "of2_ichthyosaur_view_cone", "30", 0, "Held by an ichthyosaur, the view is kept within this many degrees of its face. 0: free to look anywhere." );
+static ConVar of2_ichthyosaur_view_speed( "of2_ichthyosaur_view_speed", "360", 0, "How fast the view is turned to an ichthyosaur that has hold of the player, in degrees a second." );
+static ConVar of2_ichthyosaur_view_face( "of2_ichthyosaur_view_face", "45", 0, "The point on an ichthyosaur the held player's view is kept on: this far ahead of its origin, in units." );
+
+static void OF2_IchthyosaurView( C_BasePlayer *pPlayer, float flTime, CUserCmd *pCmd )
+{
+	float flCone = of2_ichthyosaur_view_cone.GetFloat();
+	if ( flCone <= 0.0f || pPlayer == NULL )
+		return;
+
+	C_BaseEntity *pHolder = pPlayer->GetMoveParent();
+	if ( pHolder == NULL || pHolder->GetModel() == NULL )
+		return;
+
+	// The client knows an NPC by its model, not by its class name
+	if ( Q_stristr( modelinfo->GetModelName( pHolder->GetModel() ), "ichthyosaur" ) == NULL )
+		return;
+
+	Vector vecAhead;
+	AngleVectors( pHolder->GetAbsAngles(), &vecAhead );
+
+	Vector vecAxis = ( pHolder->GetAbsOrigin() + vecAhead * of2_ichthyosaur_view_face.GetFloat() ) - pPlayer->EyePosition();
+	if ( VectorNormalize( vecAxis ) < 1.0f )
+		return;
+
+	Vector vecView;
+	AngleVectors( pCmd->viewangles, &vecView );
+
+	float flOff = RAD2DEG( acos( clamp( DotProduct( vecView, vecAxis ), -1.0f, 1.0f ) ) );
+	if ( flOff <= flCone )
+		return;
+
+	if ( flTime <= 0.0f )
+	{
+		flTime = gpGlobals->frametime;
+	}
+
+	// Towards its face, as far as the edge of the cone and no faster than the speed allows
+	float flTurn = MIN( flOff - flCone, of2_ichthyosaur_view_speed.GetFloat() * flTime );
+	float flWhole = DEG2RAD( flOff );
+	float flSin = sin( flWhole );
+
+	Vector vecNew;
+	if ( flSin < 0.001f )
+	{
+		// Looking straight away from it: any way round will do
+		vecNew = vecView + Vector( 0, 0, 0.05f );
+	}
+	else
+	{
+		float flPart = DEG2RAD( flTurn );
+		vecNew = vecView * ( sin( flWhole - flPart ) / flSin ) + vecAxis * ( sin( flPart ) / flSin );
+	}
+	VectorNormalize( vecNew );
+
+	QAngle angNew;
+	VectorAngles( vecNew, angNew );
+	angNew.x = clamp( AngleNormalize( angNew.x ), -89.0f, 89.0f );
+	angNew.y = AngleNormalize( angNew.y );
+	angNew.z = 0.0f;
+
+	pCmd->viewangles = angNew;
+	engine->SetViewAngles( angNew );
+}
+
 bool C_BaseHLPlayer::CreateMove( float flInputSampleTime, CUserCmd *pCmd )
 {
 	bool bResult = BaseClass::CreateMove( flInputSampleTime, pCmd );
+
+	OF2_IchthyosaurView( this, flInputSampleTime, pCmd );	// OF2
 
 	if ( !IsInAVehicle() )
 	{

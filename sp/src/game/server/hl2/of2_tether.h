@@ -49,6 +49,8 @@ public:
 	// the line pulls on them evenly. flSpeed: at the hardest pull (0: they stay
 	// where they were made). flFriction: how lopsided the pull has to be before
 	// one moves at all (0 always, 1 only dragged almost straight along the edge).
+	// That is for a line turning a right angle over the edge; it holds less the
+	// less the line turns there, and more folded back over it.
 	// Not saved: the owner sets it.
 	void	SetSliding( float flSpeed, float flFriction )	{ m_flSlideSpeed = flSpeed; m_flSlideFriction = flFriction; }
 

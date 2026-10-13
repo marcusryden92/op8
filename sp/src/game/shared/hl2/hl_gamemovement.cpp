@@ -1457,11 +1457,28 @@ void CHL2GameMovement::FullWalkMove()
 
 	bool bOnGround = ( player->GetGroundEntity() != NULL );
 
-	// Swimming lets go
+	// Swimming lets go of a rope. Not of a tether that comes out of the weapon
+	// (the Barnacle): its tongue came back by itself whenever the player was in
+	// water to the waist, so it could not be thrown from the water at something
+	// to climb out by (the user saw it let go on the surface). They swim as
+	// usual with it running through the hand, as it does while they walk: out
+	// as far as there is tongue, and brought in when it is reeled, up out of
+	// the water, where they hang from it as ever.
 	if ( player->GetWaterLevel() >= WL_Waist )
 	{
-		pPlayer->m_HL2Local.m_bOnTether = false;
+		if ( !pPlayer->m_HL2Local.m_bTetherAtWeapon || pPlayer->m_HL2Local.m_bTetherMantling )
+		{
+			pPlayer->m_HL2Local.m_bOnTether = false;
+			BaseClass::FullWalkMove();
+			return;
+		}
+
 		BaseClass::FullWalkMove();
+
+		Vector vecSwingPoint = pPlayer->m_HL2Local.m_vecTetherSwingPoint;
+		float flReach = vecSwingPoint.DistTo( mv->GetAbsOrigin() + TetherHandOffset() );
+		pPlayer->m_HL2Local.m_flTetherSwingLength = MIN( flReach, pPlayer->m_HL2Local.m_flTetherMaxLength );
+		TetherConstrain( false );
 		return;
 	}
 

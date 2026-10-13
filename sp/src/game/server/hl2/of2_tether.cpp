@@ -414,14 +414,25 @@ bool COF2Tether::UnwrapEnd( OF2TetherEnd_t end )
 // drags it. Nothing when it leaves the edge at the same angle on both sides,
 // which is also where the line is shortest. -2 to 2.
 //-----------------------------------------------------------------------------
-static float TetherSlidePull( const Vector &vecPivot, const Vector &vecPrev, const Vector &vecNext, const Vector &vecEdge )
+static float TetherSlidePull( const Vector &vecPivot, const Vector &vecPrev, const Vector &vecNext, const Vector &vecEdge, float *pPress = NULL )
 {
 	Vector vecToPrev = vecPrev - vecPivot;
 	Vector vecToNext = vecNext - vecPivot;
 	VectorNormalize( vecToPrev );
 	VectorNormalize( vecToNext );
 
-	return DotProduct( vecToPrev + vecToNext, vecEdge );
+	Vector vecSum = vecToPrev + vecToNext;
+	float flPull = DotProduct( vecSum, vecEdge );
+
+	// How hard the line presses on the edge: the rest of the same sum, square to
+	// the edge. Nothing for a line that goes straight on, 1.41 over a right
+	// angle, 2 folded back on itself.
+	if ( pPress )
+	{
+		*pPress = sqrt( MAX( vecSum.LengthSqr() - flPull * flPull, 0.0f ) );
+	}
+
+	return flPull;
 }
 
 //-----------------------------------------------------------------------------
@@ -451,11 +462,21 @@ void COF2Tether::SlidePivots( void )
 		const Vector vecPrev = GetPoint( i );
 		const Vector vecNext = GetPoint( i + 2 );
 
-		float flPull = TetherSlidePull( vecPivot, vecPrev, vecNext, vecEdge );
-		if ( fabs( flPull ) <= flFriction )
+		float flPress;
+		float flPull = TetherSlidePull( vecPivot, vecPrev, vecNext, vecEdge, &flPress );
+
+		// What holds it is friction, and that goes by how hard the line presses on
+		// the edge, which is how far it turns there: 1 for a right angle (where
+		// the friction asked for is what it gets), next to nothing for a line that
+		// barely bends. The speed is measured against the same, or a shallow bend,
+		// with little pull either way, would creep.
+		float flGrip = flPress * 0.7071f;
+		float flHold = flFriction * flGrip;
+		if ( fabs( flPull ) <= flHold )
 			continue;
 
-		float flStep = ( flPull - ( ( flPull > 0.0f ) ? flFriction : -flFriction ) ) * flSpeed * TICK_INTERVAL;
+		float flRate = MIN( ( fabs( flPull ) - flHold ) / MAX( flGrip, 0.1f ), 2.0f );
+		float flStep = ( ( flPull > 0.0f ) ? flRate : -flRate ) * flSpeed * TICK_INTERVAL;
 
 		// Not past the place where the pull evens out
 		if ( TetherSlidePull( vecPivot + vecEdge * flStep, vecPrev, vecNext, vecEdge ) * flPull < 0.0f )

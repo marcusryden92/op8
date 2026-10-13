@@ -1755,6 +1755,43 @@ void C_BaseAnimating::BuildTransformations( CStudioHdr *hdr, Vector *pos, Quater
 				}
 
 				// do jiggle physics
+				// OF2: the jiggle code takes a bone to lie along its own Z axis. A bone that lies along X (the
+				// ichthyosaur's tail) says so with a negative length in the QC: it is handed over with its axes
+				// moved round (X as Z) and the result moved back, so yaw and pitch bend it about the right axes.
+				if ( jiggleInfo->length < 0.0f )
+				{
+					byte infoBytes[ sizeof( mstudiojigglebone_t ) ];
+					memcpy( infoBytes, jiggleInfo, sizeof( mstudiojigglebone_t ) );
+					mstudiojigglebone_t *pTurnedInfo = (mstudiojigglebone_t *)infoBytes;
+					pTurnedInfo->length = -pTurnedInfo->length;
+
+					Vector vecX, vecY, vecZ, vecPos;
+					MatrixGetColumn( goalMX, 0, vecX );
+					MatrixGetColumn( goalMX, 1, vecY );
+					MatrixGetColumn( goalMX, 2, vecZ );
+					MatrixGetColumn( goalMX, 3, vecPos );
+
+					matrix3x4_t turnedGoal, turnedBone;
+					MatrixSetColumn( vecY, 0, turnedGoal );
+					MatrixSetColumn( vecZ, 1, turnedGoal );
+					MatrixSetColumn( vecX, 2, turnedGoal );
+					MatrixSetColumn( vecPos, 3, turnedGoal );
+					turnedBone = turnedGoal;
+
+					m_pJiggleBones->BuildJiggleTransformations( i, gpGlobals->realtime, pTurnedInfo, turnedGoal, turnedBone );
+
+					MatrixGetColumn( turnedBone, 0, vecY );
+					MatrixGetColumn( turnedBone, 1, vecZ );
+					MatrixGetColumn( turnedBone, 2, vecX );
+					MatrixGetColumn( turnedBone, 3, vecPos );
+
+					matrix3x4_t &boneOut = GetBoneForWrite( i );
+					MatrixSetColumn( vecX, 0, boneOut );
+					MatrixSetColumn( vecY, 1, boneOut );
+					MatrixSetColumn( vecZ, 2, boneOut );
+					MatrixSetColumn( vecPos, 3, boneOut );
+				}
+				else
 				m_pJiggleBones->BuildJiggleTransformations( i, gpGlobals->realtime, jiggleInfo, goalMX, GetBoneForWrite( i ) );
 
 			}

@@ -53,12 +53,16 @@ ConVar of2_tongue_blob_shade( "of2_tongue_blob_shade", "1", FCVAR_NONE, "How bri
 ConVar of2_tongue_reflect( "of2_tongue_reflect", "0.5", FCVAR_NONE, "How strongly the Barnacle's tongue mirrors its surroundings (the map's cubemaps). 0 turns it off." );
 ConVar of2_tongue_bend_radius( "of2_tongue_bend_radius", "12", FCVAR_NONE, "Where the Barnacle's tongue or a climb rope goes over an edge it is drawn going round it, starting and ending this far either side. 0 turns on the spot." );
 
-ConVar of2_tongue_overlay_map( "of2_tongue_overlay_map", "1", FCVAR_NONE, "The start of the Barnacle's tongue is drawn again in front of the world, so it does not go into a wall the player hangs against. That part ends where the map hides the tongue from the eye. 0: it runs on to the first edge the line to the tip goes over, or to the tip, and shows through walls the tongue lies behind (as before)." );
+ConVar of2_tongue_overlay_clear( "of2_tongue_overlay_clear", "1", FCVAR_NONE, "The part of the Barnacle's tongue drawn again in front of the world ends where it goes through a water surface, or behind a window or grate of the map: past that it is seen through them, as the world's own pass draws it. 0: it is drawn on top of them (as before)." );
+ConVar of2_tongue_overlay_map("of2_tongue_overlay_map", "1", FCVAR_NONE, "The start of the Barnacle's tongue is drawn again in front of the world, so it does not go into a wall the player hangs against. That part ends where the map hides the tongue from the eye. 0: it runs on to the first edge the line to the tip goes over, or to the tip, and shows through walls the tongue lies behind (as before)." );
 
 // The barnacle in the hand (the viewmodel). Not archived.
 ConVar of2_barnacle_world( "of2_barnacle_world", "1", FCVAR_NONE, "Draw the Barnacle in the hand where it is in the world, together with the start of its tongue, so that the tongue comes out of its mouth and not from behind it. 0 draws it as any other weapon, over the tongue." );
 ConVar of2_barnacle_align( "of2_barnacle_align", "180", FCVAR_NONE, "While its tongue is fixed to something that holds the player, the Barnacle in the hand turns to point along it, up to this many degrees from where it points otherwise. 180 is all the way, 0 turns it off." );
 ConVar of2_barnacle_mouth_out( "of2_barnacle_mouth_out", "16", FCVAR_NONE, "How far out of the Barnacle in the hand its tongue starts, the way its mouth points, from the root of the tongue inside the model. Negative is deeper in." );
+ConVar of2_barnacle_mouth_radius( "of2_barnacle_mouth_radius", "10", FCVAR_NONE, "The tongue starts inside the mouth of the Barnacle in the hand and has to come out through its opening: going off to the side, it is drawn out to the rim and round it, and not through the body. This is how far the rim is from the middle of the opening, for the middle of the tongue (the teeth stand about 5 off). 0: straight from where it starts, as before." );
+ConVar of2_barnacle_mouth_lip( "of2_barnacle_mouth_lip", "-30", FCVAR_NONE, "How far out past the end of the Barnacle model that rim is. Negative is further in." );
+ConVar of2_barnacle_mouth_debug( "of2_barnacle_mouth_debug", "0", FCVAR_NONE, "Draw the opening the tongue of the Barnacle in the hand has to leave through: where the tongue starts (yellow cross), the rim (green circle, red while the tongue goes round it) with the cone up to it, the way the mouth points (blue), and the place on the rim the tongue goes by (white cross)." );
 ConVar of2_barnacle_pivot( "of2_barnacle_pivot", "10", FCVAR_NONE, "The Barnacle in the hand turns along its tongue about a point this far in from its rear end, the end towards the player." );
 ConVar of2_barnacle_lift( "of2_barnacle_lift", "1", FCVAR_NONE, "The Barnacle in the hand is held up, to throw over it, when something close by (a ledge the player stands on, a fence) is between its mouth and what the crosshair is on. 0 turns it off." );
 ConVar of2_barnacle_lift_up( "of2_barnacle_lift_up", "50", FCVAR_NONE, "Held up, the Barnacle in the hand is this much higher (as of2_viewmodel_up)." );
@@ -105,6 +109,8 @@ static const float s_flFlickBack[BARNACLE_FLICK_KEYS] = { 0.0f, -0.50f, 0.70f, 1
 #define TONGUE_SIGHT_CLEAR		6.0f
 // ...and for the map itself, this close: the tip lies on what it stuck to
 #define TONGUE_SIGHT_CLEAR_MAP	3.0f
+// What counts as water for the part drawn in front of the world
+#define TONGUE_WATER_CONTENTS	( CONTENTS_WATER | CONTENTS_SLIME )
 // A stretch of tongue with nothing in its way is drawn out to an edge of the
 // line that pulls from this close to it (all the way), to twice this (not at all)
 #define TONGUE_BEND_NEAR		2.0f
@@ -114,10 +120,15 @@ static const float s_flFlickBack[BARNACLE_FLICK_KEYS] = { 0.0f, -0.50f, 0.70f, 1
 #define BARNACLE_ALIGN_TIME		0.2f
 // Where the rear end of the model is along its length (the mesh runs from 7 down to -65, the mouth)
 #define BARNACLE_REAR_Z			7.16f
+// ...and where its other end is: the opening of the mouth, at the teeth (they stand 4.8 to 6.7 off the middle)
+#define BARNACLE_MOUTH_Z			-65.0f
 
 // Where the mouth is in the model, found whenever the tongue is drawn
 static Vector	s_vecMouthLocal( 0, 0, 0 );
 static bool		s_bMouthKnown = false;
+// The model as it stood when the mouth was last found, and whether it was drawn in the world then
+static matrix3x4_t s_matMouthModel;
+static bool		s_bMouthInWorld = false;
 static bool		s_bDrawingOverlay = false;
 static float	s_flFlickTime = -1000.0f;
 static float	s_flFlickLength = 0.0f;
@@ -179,6 +190,8 @@ bool OF2_BarnacleSkipViewModelPass( C_BaseViewModel *pViewModel )
 //-----------------------------------------------------------------------------
 static void OF2_BarnacleMouth( C_BasePlayer *pPlayer, Vector *pvecMouth )
 {
+	s_bMouthInWorld = false;
+
 	C_BaseViewModel *pViewModel = pPlayer->GetViewModel( 0 );
 	if ( !OF2_IsBarnacle( pViewModel ) )
 		return;
@@ -208,6 +221,8 @@ static void OF2_BarnacleMouth( C_BasePlayer *pPlayer, Vector *pvecMouth )
 	if ( OF2_BarnacleInWorld( pViewModel ) )
 	{
 		*pvecMouth = vecBone;
+		s_matMouthModel = pViewModel->EntityToWorldTransform();
+		s_bMouthInWorld = true;
 	}
 }
 
@@ -601,6 +616,7 @@ public:
 	// Its points are moved smoothly from one tick to the next, like the
 	// objects it holds on to. (Things without a model aren't, unless they ask.)
 	virtual bool	ShouldInterpolate( void ) { return true; }
+	virtual void	PostDataUpdate( DataUpdateType_t updateType );
 
 private:
 	// The tongue, from the tip back to the barnacle; m_nNodes of them
@@ -609,9 +625,13 @@ private:
 	CInterpolatedVarArray< Vector, OF2_TONGUE_NODES > m_iv_vecNodes;
 	int		m_nNodes;
 
-	// The edges the straight way from the barnacle to the tip goes over
+	// The edges the straight way from the barnacle to the tip goes over. Moved
+	// smoothly like the points: one that slides along its edge otherwise went in
+	// steps, a tenth of a second ahead of the tongue drawn round it.
 	Vector	m_vecBends[OF2_TONGUE_MAX_BENDS];
+	CInterpolatedVarArray< Vector, OF2_TONGUE_MAX_BENDS > m_iv_vecBends;
 	int		m_nBends;
+	int		m_nBendsLatched;
 	float	m_flWidth;
 
 	CMaterialReference	m_Material;
@@ -629,10 +649,11 @@ IMPLEMENT_CLIENTCLASS_DT( C_OF2Tongue, DT_OF2Tongue, COF2Tongue )
 	RecvPropFloat( RECVINFO( m_flWidth ) ),
 END_RECV_TABLE()
 
-C_OF2Tongue::C_OF2Tongue() : m_iv_vecNodes( "C_OF2Tongue::m_iv_vecNodes" )
+C_OF2Tongue::C_OF2Tongue() : m_iv_vecNodes( "C_OF2Tongue::m_iv_vecNodes" ), m_iv_vecBends( "C_OF2Tongue::m_iv_vecBends" )
 {
 	m_nNodes = 0;
 	m_nBends = 0;
+	m_nBendsLatched = 0;
 	m_flWidth = 2.0f;
 
 	for ( int i = 0; i < OF2_TONGUE_NODES; i++ )
@@ -642,6 +663,13 @@ C_OF2Tongue::C_OF2Tongue() : m_iv_vecNodes( "C_OF2Tongue::m_iv_vecNodes" )
 
 	AddVar( m_vecNodes, &m_iv_vecNodes, LATCH_SIMULATION_VAR );
 
+	for ( int i = 0; i < OF2_TONGUE_MAX_BENDS; i++ )
+	{
+		m_vecBends[i].Init();
+	}
+
+	AddVar( m_vecBends, &m_iv_vecBends, LATCH_SIMULATION_VAR );
+
 	s_pTongue = this;
 }
 
@@ -650,6 +678,21 @@ C_OF2Tongue::~C_OF2Tongue()
 	if ( s_pTongue == this )
 	{
 		s_pTongue = NULL;
+	}
+}
+
+//-----------------------------------------------------------------------------
+// An edge that comes or goes changes which edge each place in the list is, and
+// there is nothing to move smoothly between two different edges
+//-----------------------------------------------------------------------------
+void C_OF2Tongue::PostDataUpdate( DataUpdateType_t updateType )
+{
+	BaseClass::PostDataUpdate( updateType );
+
+	if ( m_nBends != m_nBendsLatched )
+	{
+		m_nBendsLatched = m_nBends;
+		m_iv_vecBends.Reset();
 	}
 }
 
@@ -676,16 +719,18 @@ int C_OF2Tongue::DrawModel( int flags )
 
 	// From the barnacle, wherever the view has it this frame, along the points
 	// to the tip
-	Vector vecPoints[1 + OF2_TONGUE_MAX_BENDS + OF2_TONGUE_NODES + TONGUE_MAX_CORNERS];
-	bool bBend[1 + OF2_TONGUE_MAX_BENDS + OF2_TONGUE_NODES + TONGUE_MAX_CORNERS];
+	Vector vecPoints[1 + OF2_TONGUE_MAX_BENDS + OF2_TONGUE_NODES + TONGUE_MAX_CORNERS + 1];
+	bool bBend[1 + OF2_TONGUE_MAX_BENDS + OF2_TONGUE_NODES + TONGUE_MAX_CORNERS + 1];
 	// (where the server has each of them: see the part drawn in front of the world, below)
-	Vector vecSight[1 + OF2_TONGUE_MAX_BENDS + OF2_TONGUE_NODES + TONGUE_MAX_CORNERS];
+	Vector vecSight[1 + OF2_TONGUE_MAX_BENDS + OF2_TONGUE_NODES + TONGUE_MAX_CORNERS + 1];
 	int nPoints = 0;
 
 	Vector vecMouth = OF2_TetherHoldPos( pPlayer, true );
 	vecSight[nPoints] = vecMouth;
 	OF2_BarnacleMouth( pPlayer, &vecMouth );
 	vecPoints[nPoints] = vecMouth;
+	bool bMouthInWorld = s_bMouthInWorld;
+	matrix3x4_t matMouthModel = s_matMouthModel;
 	bBend[nPoints] = false;
 	nPoints++;
 
@@ -883,6 +928,118 @@ int C_OF2Tongue::DrawModel( int flags )
 		}
 	}
 
+	// The tongue starts inside the barnacle's mouth, and the mouth is a funnel:
+	// what leaves it has to come out through the opening. Going off to the side
+	// (a deep swing, before the barnacle has turned along it, or a tongue that
+	// is not held and so does not turn it at all) the straight way from the
+	// start to the next point went out through the body (the user saw that).
+	// So where that way misses the opening, the tongue is drawn out to the rim
+	// on that side and round it, as over any edge. Worked out in the model's
+	// own space, where the mouth points down its Z.
+	float flRim = of2_barnacle_mouth_radius.GetFloat();
+	float flDeep = s_vecMouthLocal.z - ( BARNACLE_MOUTH_Z - of2_barnacle_mouth_lip.GetFloat() );
+	bool bOverRim = false;
+	if ( bMouthInWorld && flRim > 0.0f && flDeep > 0.5f )
+	{
+		// Points still in the mouth (not yet past the opening), or right at it, say
+		// nothing about which way the tongue leaves (never the last one: that is the
+		// tip). Only those: everything within reach of the mouth used to be left out,
+		// which drew a long straight stretch in place of the tongue's own curve there.
+		float flNear = ( flDeep + flRim ) * 1.5f;
+		Vector vecOpening;
+		VectorTransform( Vector( s_vecMouthLocal.x, s_vecMouthLocal.y, s_vecMouthLocal.z - flDeep ), matMouthModel, vecOpening );
+
+		int nDrop = 0;
+		while ( nDrop + 2 < nPoints && !bBend[nDrop + 1] )
+		{
+			Vector vecLocal;
+			VectorITransform( vecPoints[nDrop + 1], matMouthModel, vecLocal );
+			bool bInside = ( s_vecMouthLocal.z - vecLocal.z < flDeep ) && vecPoints[nDrop + 1].DistTo( vecMouth ) < flNear;
+			if ( !bInside && vecPoints[nDrop + 1].DistTo( vecOpening ) > flRim )
+				break;
+
+			nDrop++;
+		}
+
+		if ( nDrop > 0 )
+		{
+			for ( int i = 1; i + nDrop < nPoints; i++ )
+			{
+				vecPoints[i] = vecPoints[i + nDrop];
+				vecSight[i] = vecSight[i + nDrop];
+				bBend[i] = bBend[i + nDrop];
+			}
+			nPoints -= nDrop;
+		}
+
+		Vector vecNext;
+		VectorITransform( vecPoints[1], matMouthModel, vecNext );
+		vecNext -= s_vecMouthLocal;
+
+		// (out of the mouth is down the model's Z)
+		float flOut = -vecNext.z;
+		float flSide = vecNext.Length2D();
+		if ( flSide > 0.01f && flSide * flDeep > flRim * flOut )
+		{
+			Vector vecRimLocal( s_vecMouthLocal.x + vecNext.x * ( flRim / flSide ), s_vecMouthLocal.y + vecNext.y * ( flRim / flSide ), s_vecMouthLocal.z - flDeep );
+
+			for ( int i = nPoints; i > 1; i-- )
+			{
+				vecPoints[i] = vecPoints[i - 1];
+				vecSight[i] = vecSight[i - 1];
+				bBend[i] = bBend[i - 1];
+			}
+
+			VectorTransform( vecRimLocal, matMouthModel, vecPoints[1] );
+			vecSight[1] = vecSight[0];
+			// Not as an edge of the map is (bBend): the stretches either side of one of
+			// those are drawn straight, which left a sharp corner at the first point
+			// after the rim, out in the open (the user's screenshot). The tongue's
+			// curve just goes through this place.
+			bBend[1] = false;
+			nPoints++;
+			bOverRim = true;
+		}
+	}
+
+	// (once a frame: this is also called for the world's pass, and for reflections)
+	if ( of2_barnacle_mouth_debug.GetBool() && bMouthInWorld && s_bDrawingOverlay )
+	{
+		Vector vecRimMid( s_vecMouthLocal.x, s_vecMouthLocal.y, s_vecMouthLocal.z - flDeep );
+		Vector vecMid, vecOut;
+		VectorTransform( vecRimMid, matMouthModel, vecMid );
+		VectorTransform( vecRimMid - Vector( 0, 0, 12 ), matMouthModel, vecOut );
+
+		NDebugOverlay::Cross3D( vecMouth, 1.0f, 255, 255, 0, true, 0.0f );
+		NDebugOverlay::Line( vecMouth, vecOut, 0, 128, 255, true, 0.0f );
+
+		int r = bOverRim ? 255 : 0;
+		int g = bOverRim ? 0 : 255;
+		Vector vecLast;
+		for ( int i = 0; i <= 16; i++ )
+		{
+			float flTurn = i * ( 2.0f * M_PI / 16.0f );
+			Vector vecAt;
+			VectorTransform( vecRimMid + Vector( cos( flTurn ), sin( flTurn ), 0.0f ) * MAX( flRim, 0.0f ), matMouthModel, vecAt );
+			if ( i > 0 )
+			{
+				NDebugOverlay::Line( vecLast, vecAt, r, g, 0, true, 0.0f );
+			}
+			if ( ( i & 3 ) == 0 )
+			{
+				NDebugOverlay::Line( vecMouth, vecAt, r, g, 0, true, 0.0f );
+			}
+			vecLast = vecAt;
+		}
+
+		if ( bOverRim )
+		{
+			NDebugOverlay::Cross3D( vecPoints[1], 1.0f, 255, 255, 255, true, 0.0f );
+		}
+
+		engine->Con_NPrintf( 12, "barnacle mouth: start %.1f inside the rim (needs over 0.5), radius %.1f, tongue %s", flDeep, flRim, bOverRim ? "ROUND THE RIM" : "through the opening" );
+	}
+
 	OF2CurveStyle_t style;
 	style.pMaterial = m_Material;
 	style.pShineMaterial = m_ShineMaterial;
@@ -932,6 +1089,16 @@ int C_OF2Tongue::DrawModel( int flags )
 		CTraceFilterTongueSight filter( pPlayer );
 		CTraceFilterWorldAndPropsOnly mapFilter;
 
+		// And at what is seen through: a water surface, a window or a grate in the
+		// map. Those are drawn before this pass, so a tongue behind one was drawn
+		// on top of it: clean and sharp over the water it had gone into (the user
+		// saw that). From there on the world's pass has it right, under the water
+		// or behind the glass. A point is past a water surface when it is in
+		// water and the eye is not, or the other way round.
+		bool bSeeThrough = of2_tongue_overlay_clear.GetBool();
+		int nMapMask = bSeeThrough ? ( MASK_OPAQUE | CONTENTS_WINDOW | CONTENTS_GRATE ) : MASK_OPAQUE;
+		bool bEyeWet = ( enginetrace->GetPointContents( vecEye ) & TONGUE_WATER_CONTENTS ) != 0;
+
 		bool bEnds = false;
 		bool bHidden = false;
 		float flUpTo = 0.0f;
@@ -948,7 +1115,26 @@ int C_OF2Tongue::DrawModel( int flags )
 
 			float flStretch = vecPoints[i].DistTo( vecPoints[i - 1] );
 
-			UTIL_TraceLine( vecEye, vecSight[i], MASK_OPAQUE, &mapFilter, &tr );
+			if ( bSeeThrough && ( ( enginetrace->GetPointContents( vecPoints[i] ) & TONGUE_WATER_CONTENTS ) != 0 ) != bEyeWet )
+			{
+				// Up to where it goes through the surface between the last point and this one
+				float flSeen = 0.0f;
+				float flStep = 0.5f;
+				for ( int k = 0; k < 5; k++, flStep *= 0.5f )
+				{
+					Vector vecAt = vecPoints[i - 1] + ( vecPoints[i] - vecPoints[i - 1] ) * ( flSeen + flStep );
+					if ( ( ( enginetrace->GetPointContents( vecAt ) & TONGUE_WATER_CONTENTS ) != 0 ) == bEyeWet )
+					{
+						flSeen += flStep;
+					}
+				}
+
+				// (and no least length: the barnacle itself can be the other side of it)
+				style.flDrawLength = MAX( flUpTo + flStretch * flSeen, 0.01f );
+				break;
+			}
+
+			UTIL_TraceLine( vecEye, vecSight[i], nMapMask, &mapFilter, &tr );
 			if ( of2_tongue_overlay_map.GetBool() && tr.fraction < 1.0f && tr.endpos.DistTo( vecSight[i] ) > TONGUE_SIGHT_CLEAR_MAP )
 			{
 				// Up to where it goes out of sight between the last point and this one
@@ -957,7 +1143,7 @@ int C_OF2Tongue::DrawModel( int flags )
 				for ( int k = 0; k < 3; k++, flStep *= 0.5f )
 				{
 					Vector vecAt = vecSight[i - 1] + ( vecSight[i] - vecSight[i - 1] ) * ( flSeen + flStep );
-					UTIL_TraceLine( vecEye, vecAt, MASK_OPAQUE, &mapFilter, &tr );
+					UTIL_TraceLine( vecEye, vecAt, nMapMask, &mapFilter, &tr );
 					if ( tr.fraction == 1.0f || tr.endpos.DistTo( vecAt ) <= TONGUE_SIGHT_CLEAR_MAP )
 					{
 						flSeen += flStep;
